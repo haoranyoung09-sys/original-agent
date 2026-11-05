@@ -1,4 +1,4 @@
-﻿# original-agent
+# original-agent
 
 Rust 编写的多厂商终端 coding agent，交互参考 [Pi](https://github.com/badlogic/pi-mono)。命令名为 `original`。
 
@@ -6,12 +6,12 @@ Rust 编写的多厂商终端 coding agent，交互参考 [Pi](https://github.co
 
 无需 Rust 的安装方式（预编译 Release；本机不必安装 Rust 工具链）：
 
-> **当前状态（2026-11-05）**：GitHub Releases 仍为空，没有 `original-windows-x86_64.exe` 等附件，因此 `irm … | iex` / `curl … | sh` 会得到 **HTTP 404**。发布带附件的 Release 之前，请用下面的本机构建安装，或先 `cargo build --release`。
+> **当前状态（2026-11-05）**：GitHub Releases 仍为空，没有 `original-windows-x86_64.exe` 等附件，因此 `iex (irm …)` / `curl … | sh` 会得到 **HTTP 404**。发布带附件的 Release 之前，请用下面的本机构建安装，或先 `cargo build --release`。
 
-Windows PowerShell（x64）：
+Windows PowerShell（x64）——推荐 `iex (irm …)`（整段字符串一次执行）。不要用会把脚本灌进交互提示符的粘贴/stdin 方式；旧写法 `irm … | iex` 在多数情况下也能用，但不如括号形式稳妥：
 
 ```powershell
-irm https://raw.githubusercontent.com/haoranyoung09-sys/original-agent/main/scripts/install.ps1 | iex
+iex (irm https://raw.githubusercontent.com/haoranyoung09-sys/original-agent/main/scripts/install.ps1)
 ```
 
 固定版本：
@@ -20,7 +20,12 @@ irm https://raw.githubusercontent.com/haoranyoung09-sys/original-agent/main/scri
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/haoranyoung09-sys/original-agent/main/scripts/install.ps1))) -Version v0.3.3
 ```
 
-或先下载脚本再执行：`powershell -File install.ps1 -Version v0.3.3`。
+不经过 `iex` 的备用（先下载再 `-File`）：
+
+```powershell
+Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/haoranyoung09-sys/original-agent/main/scripts/install.ps1 -OutFile $env:TEMP\original-install.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File $env:TEMP\original-install.ps1
+```
 
 Release 尚未发布时，可用仓库里已构建的二进制（需先 `cargo build --locked --release`）：
 

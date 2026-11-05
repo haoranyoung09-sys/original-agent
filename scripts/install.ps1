@@ -1,30 +1,18 @@
-﻿#Requires -Version 5.1
-<#
-.SYNOPSIS
-  Install prebuilt `original` from GitHub Releases (no Rust required).
-
-.PARAMETER Version
-  `latest` or `vX.Y.Z` (must match a published Release tag that has assets).
-
-.PARAMETER BaseUrl
-  Override download base. HTTPS GitHub URL, or a local directory that already
-  contains the asset + `.sha256` (for offline / installer tests).
-  Env: ORIGINAL_INSTALL_BASE
-
-.PARAMETER BinDir
-  Install directory for `original.exe`. Default: %USERPROFILE%\.original-agent\bin
-  Env: ORIGINAL_INSTALL_BIN
-
-.PARAMETER NoPathUpdate
-  Do not modify the user PATH. Env: ORIGINAL_INSTALL_NO_PATH=1
-#>
+# Install prebuilt `original` from GitHub Releases (no Rust required).
+# Do NOT put #Requires here: interactive / stdin / some irm|iex paths treat it as a
+# top-level command and fail with "在创建管道时出错" (pipeline creation error), then
+# dump the rest of the file into the prompt (>> after incomplete param().
+# Prefer:  iex (irm 'https://raw.githubusercontent.com/<owner>/<repo>/main/scripts/install.ps1')
+# Avoid:   irm ... | iex   (works for a single string in PS 5.1, but less reliable)
+# File:    powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
+# Params:  -Version latest|vX.Y.Z  -BaseUrl <url|dir>  -BinDir <dir>  -NoPathUpdate
+# Env:     ORIGINAL_INSTALL_BASE  ORIGINAL_INSTALL_BIN  ORIGINAL_INSTALL_NO_PATH=1
 param(
     [string]$Version = "latest",
     [string]$BaseUrl = "",
     [string]$BinDir = "",
     [switch]$NoPathUpdate
 )
-
 $ErrorActionPreference = "Stop"
 $Repo = "haoranyoung09-sys/original-agent"
 
@@ -34,10 +22,10 @@ function Get-MissingReleaseHelp {
 Release asset not found (HTTP 404): $Url
 
 No usable GitHub Release assets yet (empty Releases page or missing original-windows-x86_64.exe).
-The no-Rust irm|iex installer cannot succeed until a Release with attachments is published.
+The no-Rust remote installer (iex (irm ...)) cannot succeed until a Release with attachments is published.
 
 What to do now:
-  1) Publish a Release: push a tag matching Cargo.toml (e.g. v0.3.3), wait for Actions "Release binaries", then retry irm|iex
+  1) Publish a Release: push a tag matching Cargo.toml (e.g. v0.3.3), wait for Actions "Release binaries", then retry: iex (irm <raw-url>)
   2) If this repo already has target\release\original.exe:
        powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-from-local-build.ps1
   3) If you have Rust:
