@@ -18,9 +18,9 @@ Linux x64 / macOS Intel、Apple Silicon：
 curl -fsSL https://raw.githubusercontent.com/haoranyoung09-sys/original-agent/main/scripts/install.sh | sh
 ```
 
-脚本下载 GitHub Release 并校验 SHA-256。Windows 自动添加用户 PATH；Unix 安装到 `~/.local/bin`，若尚未在 PATH 会提示配置命令。Linux 版本基于 Ubuntu 22.04，需要兼容 glibc 和 OpenSSL 运行库。更新时重复安装命令；固定版本可下载脚本后传入 `v0.3.2`（PowerShell 使用 `-Version v0.3.2`）。
+脚本下载 GitHub Release 并校验 SHA-256。Windows 自动添加用户 PATH；Unix 安装到 `~/.local/bin`，若尚未在 PATH 会提示配置命令。Linux 版本基于 Ubuntu 22.04，需要兼容 glibc 和 OpenSSL 运行库。更新时重复安装命令；固定版本可下载脚本后传入 `v0.3.3`（PowerShell 使用 `-Version v0.3.3`）。
 
-维护者发布：提交并推送代码后，推送与 Cargo.toml 版本相同的标签（如 `v0.3.2`）；Release 工作流构建四个平台并发布附件。脚本校验完整性，不提供独立代码签名。首次 Release 完成前下载会失败，已有安装不会因此被替换。
+维护者发布：提交并推送代码后，推送与 Cargo.toml 版本相同的标签（如 `v0.3.3`）；Release 工作流构建四个平台并发布附件。脚本校验完整性，不提供独立代码签名。首次 Release 完成前下载会失败，已有安装不会因此被替换。
 
 ### 从源码安装
 
