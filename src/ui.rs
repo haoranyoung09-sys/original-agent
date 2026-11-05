@@ -212,8 +212,8 @@ pub fn print_status_full(session: &SessionState, cfg: &Config, cwd: &std::path::
 }
 
 /// Pi-like prompt — no frame.
-pub fn input_prompt() -> String {
-    format!("{}\n❯ ", "─".repeat(60))
+pub fn input_prompt(width: usize) -> String {
+    format!("{}\n❯ ", "─".repeat(width))
 }
 
 pub fn print_help_panel() {
@@ -247,22 +247,42 @@ fn effort_color(effort: crate::session::EffortLevel) -> &'static str {
 pub fn color_input(text: &str, effort: crate::session::EffortLevel) -> String {
     c(effort_color(effort), text)
 }
-pub fn input_footer(model: &str, effort: crate::session::EffortLevel) -> String {
-    let name: String = if model.is_empty() { "未登录" } else { model }
+pub fn input_footer(model: &str, effort: crate::session::EffortLevel, width: usize) -> String {
+    let name = if model.is_empty() { "未登录" } else { model };
+    let mut label = String::new();
+    let mut label_width = 0;
+    for ch in format!(" {} · {} ", name, effort.as_str())
         .chars()
         .filter(|ch| !ch.is_control())
-        .take(36)
-        .collect();
-    format!("{} {} · {} ────", "─".repeat(12), name, effort.as_str())
+    {
+        let cells = if ch.is_ascii() || ch == '·' { 1 } else { 2 };
+        if label_width + cells > width.saturating_sub(4) {
+            break;
+        }
+        label.push(ch);
+        label_width += cells;
+    }
+    let left = width.saturating_sub(label_width + 2);
+    format!(
+        "{}{}{}",
+        "─".repeat(left),
+        label,
+        "─".repeat(width.saturating_sub(left + label_width))
+    )
 }
 #[cfg(test)]
 mod input_tests {
     use super::*;
     #[test]
-    fn frame_has_continuous_rules_and_center_dot() {
-        assert_eq!(input_prompt(), format!("{}\n❯ ", "─".repeat(60)));
-        let footer = input_footer("test-model", crate::session::EffortLevel::High);
-        assert!(footer.contains("test-model · high"));
-        assert!(!footer.contains('\n'));
+    fn frame_fills_terminal_width() {
+        for width in [40, 80, 120] {
+            assert_eq!(
+                input_prompt(width).lines().next().unwrap().chars().count(),
+                width
+            );
+            let footer = input_footer("model", crate::session::EffortLevel::High, width);
+            assert_eq!(footer.chars().count(), width);
+            assert!(footer.contains("model · high"));
+        }
     }
 }

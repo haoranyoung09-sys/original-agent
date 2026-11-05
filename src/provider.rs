@@ -131,3 +131,34 @@ impl std::fmt::Display for ProviderId {
         f.write_str(self.as_str())
     }
 }
+
+/// Normalize known DeepSeek endpoints for the Anthropic SDK, which appends /v1/messages.
+pub fn anthropic_base_url(base: &str) -> String {
+    let base = base.trim_end_matches('/');
+    if matches!(
+        base,
+        "https://api.deepseek.com" | "https://api.deepseek.com/v1"
+    ) {
+        return "https://api.deepseek.com/anthropic".into();
+    }
+    base.strip_suffix("/v1").unwrap_or(base).to_string()
+}
+#[cfg(test)]
+mod endpoint_tests {
+    use super::*;
+    #[test]
+    fn deepseek_anthropic_endpoint_has_correct_prefix() {
+        assert_eq!(
+            anthropic_base_url("https://api.deepseek.com"),
+            "https://api.deepseek.com/anthropic"
+        );
+        assert_eq!(
+            anthropic_base_url("https://api.deepseek.com/anthropic/v1/"),
+            "https://api.deepseek.com/anthropic"
+        );
+        assert_eq!(
+            anthropic_base_url("https://custom.example/anthropic"),
+            "https://custom.example/anthropic"
+        );
+    }
+}

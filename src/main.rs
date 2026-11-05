@@ -74,7 +74,7 @@ fn build_backend(cfg: &Config) -> Result<Backend> {
         ApiStyle::Anthropic => {
             let client = Anthropic::new(Some(key))
                 .context("创建 Anthropic 兼容客户端失败")?
-                .with_base_url(cfg.base_url.trim_end_matches('/').to_string());
+                .with_base_url(provider::anthropic_base_url(&cfg.base_url));
             Ok(Backend::Anthropic(client))
         }
         ApiStyle::OpenAI => Ok(Backend::OpenAi(OpenAiClient::new(key, &cfg.base_url)?)),
@@ -260,6 +260,7 @@ impl ConditionalEventHandler for CycleEffortHandler {
 struct ReplHelper {
     session: Option<SharedSession>,
     input_frame: bool,
+    frame_width: usize,
 }
 
 impl rustyline::Helper for ReplHelper {}
@@ -284,7 +285,7 @@ impl rustyline::hint::Hinter for ReplHelper {
         let s = self.session.as_ref()?.lock().ok()?;
         Some(FrameHint(format!(
             "\n{}",
-            ui::input_footer(&s.model, s.effort)
+            ui::input_footer(&s.model, s.effort, self.frame_width)
         )))
     }
 }
@@ -598,6 +599,7 @@ async fn main() -> Result<()> {
     rl.set_helper(Some(ReplHelper {
         session: Some(session.clone()),
         input_frame: false,
+        frame_width: 60,
     }));
     rl.bind_sequence(
         KeyEvent(KeyCode::BackTab, Modifiers::NONE),
@@ -613,8 +615,14 @@ async fn main() -> Result<()> {
     }
 
     loop {
+        let width = rl
+            .dimensions()
+            .map(|(cols, _)| cols.saturating_sub(1))
+            .unwrap_or(60)
+            .max(4);
         rl.helper_mut().unwrap().input_frame = true;
-        let prompt = ui::input_prompt();
+        rl.helper_mut().unwrap().frame_width = width;
+        let prompt = ui::input_prompt(width);
         let input = rl.readline(&prompt);
         rl.helper_mut().unwrap().input_frame = false;
         match input {
