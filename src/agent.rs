@@ -8,7 +8,10 @@ use async_trait::async_trait;
 use claudius::{Agent, Effort, Model, OutputConfig, SystemPrompt, ThinkingConfig, Tool};
 
 use crate::session::EffortLevel;
-use crate::tools::{BashTool, EditTool, ReadTool, ToolCtx, WriteTool};
+use crate::tools::{
+    BashTool, EditTool, GlobTool, GrepTool, MultiEditTool, ProjectOverviewTool, ReadTool, ToolCtx,
+    VerifyTool, WriteTool,
+};
 
 #[derive(Debug, Clone)]
 pub struct AgentRuntime {
@@ -59,28 +62,32 @@ impl OriginalAgent {
 
     fn system_prompt_text(&self) -> String {
         let shell = if cfg!(windows) {
-            "Windows PowerShell（bash 工具会通过 powershell -Command 执行）"
+            "Windows PowerShell（bash/verify 通过 powershell -Command；默认禁用，需 --allow-shell）"
         } else {
-            "POSIX sh（bash 工具通过 sh -c 执行）"
+            "POSIX sh（bash/verify 通过 sh -c；默认禁用，需 --allow-shell）"
         };
         format!(
-            r#"你是 original，一个运行在本地工作区中的终端 coding agent（风格类似 Pi）。
+            r#"你是 original，一个运行在本地工作区中的终端 vibe-coding agent（风格类似 Pi）。
 
 工作区根目录: {cwd}
 Shell: {shell}
 
-你有以下工具，请优先用工具完成任务，而不是空谈：
-- read: 读取文件（改动前先读）
-- write: 创建/覆盖文件
-- edit: 精确字符串替换（old_str 必须唯一）
-- bash: 在工作区内执行命令
+工具（优先用工具，不要空谈或编造文件内容）:
+- project_overview: 先摸清项目类型与目录树
+- glob / grep: 无 shell 的文件发现与内容搜索
+- read: 改动前先读
+- edit: 单处唯一字符串替换
+- multi_edit: 跨文件/多处协调修改（先全部校验再写入）
+- write: 新建或整文件覆盖
+- verify: 改后跑测试/构建反馈（需 --allow-shell；否则会给出建议命令）
+- bash: 任意命令（需 --allow-shell）
 
-规则:
-1. 路径一律相对工作区；不要尝试访问工作区外的文件。
-2. 修改已有文件前先 read；小改动优先用 edit，大改动可用 write。
-3. 用 bash 跑测试、查看目录、执行构建命令。
-4. 简洁汇报你做了什么；需要时展示关键命令输出。
-5. 不要编造文件内容；不确定就 read / bash。
+Vibe coding 工作流:
+1. 陌生仓库先 project_overview 或 glob，再用 grep/read 定位。
+2. 小改动用 edit；同一意图涉及多处/多文件时用 multi_edit。
+3. 路径一律相对工作区；禁止逃逸工作区。
+4. Shell 默认关闭：不要假设能跑 bash/verify；没有权限时说明并给出建议命令。
+5. 简洁汇报做了什么；需要时引用工具输出关键片段。
 "#,
             cwd = self.root_std.display(),
             shell = shell,
@@ -124,15 +131,20 @@ impl Agent for OriginalAgent {
     async fn tools(&self) -> Vec<Arc<dyn Tool<Self>>> {
         let ctx = self.tool_ctx.clone();
         vec![
+            Arc::new(ProjectOverviewTool { ctx: ctx.clone() }) as Arc<dyn Tool<Self>>,
+            Arc::new(GlobTool { ctx: ctx.clone() }) as Arc<dyn Tool<Self>>,
+            Arc::new(GrepTool { ctx: ctx.clone() }) as Arc<dyn Tool<Self>>,
             Arc::new(ReadTool { ctx: ctx.clone() }) as Arc<dyn Tool<Self>>,
             Arc::new(WriteTool { ctx: ctx.clone() }) as Arc<dyn Tool<Self>>,
             Arc::new(EditTool { ctx: ctx.clone() }) as Arc<dyn Tool<Self>>,
+            Arc::new(MultiEditTool { ctx: ctx.clone() }) as Arc<dyn Tool<Self>>,
+            Arc::new(VerifyTool { ctx: ctx.clone() }) as Arc<dyn Tool<Self>>,
             Arc::new(BashTool { ctx }) as Arc<dyn Tool<Self>>,
         ]
     }
 
     async fn bash(&self, command: &str, _restart: bool) -> Result<String, std::io::Error> {
-        let (code, stdout, stderr) = crate::tools::execute_shell(command, &self.root_std, 60);
+        let (code, stdout, stderr) = crate::shell::execute_shell(command, &self.root_std, 60);
         let mut out = format!("exit_code: {code}\n");
         if !stdout.is_empty() {
             out.push_str("stdout:\n");
@@ -149,5 +161,26 @@ impl Agent for OriginalAgent {
         } else {
             Err(std::io::Error::other(out))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn system_prompt_mentions_vibe_tools() {
+        let agent = OriginalAgent::new(
+            std::env::temp_dir(),
+            "m".into(),
+            EffortLevel::Medium,
+            1024,
+        )
+        .unwrap();
+        let prompt = agent.system_prompt_text();
+        assert!(prompt.contains("multi_edit"));
+        assert!(prompt.contains("project_overview"));
+        assert!(prompt.contains("verify"));
+        assert!(prompt.contains("--allow-shell"));
     }
 }

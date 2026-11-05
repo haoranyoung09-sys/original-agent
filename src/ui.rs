@@ -228,7 +228,8 @@ pub fn print_help_panel() {
 /clear            清空对话（用量保留）
 /help  /exit      帮助 / 退出
 Shift+Tab         思考强度 low → medium → high
-original -p \"…\"   一次性（需已登录）"
+original -p \"…\"   一次性（需已登录）
+工具               project_overview / glob / grep / read / edit / multi_edit / write / verify / bash"
         )
     );
 }
@@ -289,6 +290,9 @@ pub fn terminal_width(fallback: usize) -> usize {
 #[cfg(test)]
 mod input_tests {
     use super::*;
+    use crate::config::Config;
+    use crate::session::{EffortLevel, SessionState, UsageStats};
+
     #[test]
     fn frame_fills_terminal_width() {
         for width in [40, 80, 120] {
@@ -296,9 +300,38 @@ mod input_tests {
                 input_prompt(width).lines().next().unwrap().chars().count(),
                 width
             );
-            let footer = input_footer("model", crate::session::EffortLevel::High, width);
+            let footer = input_footer("model", EffortLevel::High, width);
             assert_eq!(footer.chars().count(), width);
             assert!(footer.contains("model · high"));
         }
+    }
+
+    #[test]
+    fn status_line_for_logged_out_and_usage() {
+        let cfg = Config::default();
+        let mut s = SessionState::from_config(&cfg, false);
+        let line = status_line(&s, &cfg);
+        assert!(line.contains("未登录"));
+        assert!(line.contains(s.effort.as_str()));
+        s.logged_in = true;
+        s.model = "demo".into();
+        s.usage = UsageStats {
+            input_tokens: 1500,
+            output_tokens: 20,
+            turns: 1,
+            last_context_tokens: 1000,
+            ..Default::default()
+        };
+        s.context_window = 2000;
+        let line = status_line(&s, &cfg);
+        assert!(line.contains("demo"));
+        assert!(line.contains("ctx 50%"));
+    }
+
+    #[test]
+    fn effort_colors_cycle_contract() {
+        assert_eq!(effort_color(EffortLevel::Low), "36");
+        assert_eq!(effort_color(EffortLevel::Medium), "33");
+        assert_eq!(effort_color(EffortLevel::High), "35");
     }
 }

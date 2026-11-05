@@ -1,10 +1,14 @@
 //! original — multi-provider Pi-like terminal coding agent (claudius + OpenAI-compatible).
 
 mod agent;
+mod commands;
 mod config;
+mod fsops;
 mod openai_client;
 mod provider;
 mod session;
+mod shell;
+mod tool_dispatch;
 mod tools;
 mod ui;
 mod workspace;
@@ -630,58 +634,63 @@ async fn main() -> Result<()> {
                 }
                 let _ = rl.add_history_entry(line.as_str());
 
-                if line == "/exit" || line == "/quit" {
-                    println!("bye");
-                    break;
-                }
-                if line == "/clear" {
-                    anthropic_messages.clear();
-                    openai_messages.clear();
-                    println!("(对话历史已清空；会话累计用量保留，见 /status)");
-                    continue;
-                }
-                if line == "/help" || line == "/?" {
-                    print_help();
-                    continue;
-                }
-                if line == "/status" {
-                    let s = session.lock().unwrap();
-                    ui::print_status_full(&s, &cfg, &cwd);
-                    continue;
-                }
-                if line == "/login" || line.starts_with("/login ") {
-                    if let Err(e) = do_login(&mut rl, &mut cfg, &session, &agent, &mut backend) {
-                        eprintln!("登录失败: {e:#}");
-                    } else {
-                        // Reset chat histories when switching backends.
+                match commands::parse_slash(&line) {
+                    commands::SlashAction::Exit => {
+                        println!("bye");
+                        break;
+                    }
+                    commands::SlashAction::Clear => {
                         anthropic_messages.clear();
                         openai_messages.clear();
-                    }
-                    continue;
-                }
-                if line == "/model" || line.starts_with("/model ") {
-                    let logged_in = session.lock().map(|s| s.logged_in).unwrap_or(false);
-                    if !logged_in {
-                        println!("请先 /login。");
+                        println!("(对话历史已清空；会话累计用量保留，见 /status)");
                         continue;
                     }
-                    let rest = line.strip_prefix("/model").unwrap_or("").trim();
-                    if rest.is_empty() {
-                        let s = session.lock().unwrap();
-                        println!("当前模型: {}", s.model);
-                        println!("切换: /model <name>");
-                    } else {
-                        cfg.model = rest.to_string();
-                        let _ = cfg.save();
-                        session.lock().unwrap().model = cfg.model.clone();
-                        agent.set_model(cfg.model.clone());
-                        println!("model → {}", cfg.model);
+                    commands::SlashAction::Help => {
+                        print_help();
+                        continue;
                     }
-                    continue;
-                }
-                if line.starts_with('/') {
-                    println!("未知命令: {line}（试试 /help）");
-                    continue;
+                    commands::SlashAction::Status => {
+                        let s = session.lock().unwrap();
+                        ui::print_status_full(&s, &cfg, &cwd);
+                        continue;
+                    }
+                    commands::SlashAction::Login => {
+                        if let Err(e) = do_login(&mut rl, &mut cfg, &session, &agent, &mut backend) {
+                            eprintln!("登录失败: {e:#}");
+                        } else {
+                            // Reset chat histories when switching backends.
+                            anthropic_messages.clear();
+                            openai_messages.clear();
+                        }
+                        continue;
+                    }
+                    commands::SlashAction::Model { name } => {
+                        let logged_in = session.lock().map(|s| s.logged_in).unwrap_or(false);
+                        if !logged_in {
+                            println!("请先 /login。");
+                            continue;
+                        }
+                        match name {
+                            None => {
+                                let s = session.lock().unwrap();
+                                println!("当前模型: {}", s.model);
+                                println!("切换: /model <name>");
+                            }
+                            Some(rest) => {
+                                cfg.model = rest;
+                                let _ = cfg.save();
+                                session.lock().unwrap().model = cfg.model.clone();
+                                agent.set_model(cfg.model.clone());
+                                println!("model → {}", cfg.model);
+                            }
+                        }
+                        continue;
+                    }
+                    commands::SlashAction::Unknown(cmd) => {
+                        println!("未知命令: {cmd}（试试 /help）");
+                        continue;
+                    }
+                    commands::SlashAction::NotSlash => {}
                 }
 
                 let logged_in = session.lock().map(|s| s.logged_in).unwrap_or(false);
@@ -745,6 +754,9 @@ async fn main() -> Result<()> {
 
 #[cfg(test)]
 mod wire_tests {
+    use crate::commands::{parse_slash, SlashAction};
+    use crate::session::EffortLevel;
+
     #[test]
     fn custom_tools_omit_server_type() {
         let tool = claudius::ToolUnionParam::new_custom_tool(
@@ -755,5 +767,27 @@ mod wire_tests {
         assert!(value.get("type").is_none());
         assert_eq!(value["name"], "read");
         assert_eq!(value["input_schema"]["type"], "object");
+    }
+
+    #[test]
+    fn repl_slash_contract() {
+        assert_eq!(parse_slash("/exit"), SlashAction::Exit);
+        assert_eq!(parse_slash("/clear"), SlashAction::Clear);
+        assert_eq!(parse_slash("/help"), SlashAction::Help);
+        assert_eq!(parse_slash("/status"), SlashAction::Status);
+        assert_eq!(parse_slash("/login"), SlashAction::Login);
+        assert_eq!(
+            parse_slash("/model demo"),
+            SlashAction::Model {
+                name: Some("demo".into())
+            }
+        );
+    }
+
+    #[test]
+    fn effort_cycles_like_shift_tab() {
+        assert_eq!(EffortLevel::Low.cycle(), EffortLevel::Medium);
+        assert_eq!(EffortLevel::Medium.cycle(), EffortLevel::High);
+        assert_eq!(EffortLevel::High.cycle(), EffortLevel::Low);
     }
 }

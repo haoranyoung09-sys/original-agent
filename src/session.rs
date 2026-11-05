@@ -137,3 +137,43 @@ impl SessionState {
 }
 
 pub type SharedSession = Arc<Mutex<SessionState>>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+
+    #[test]
+    fn effort_parse_and_cycle() {
+        assert_eq!("low".parse::<EffortLevel>().unwrap(), EffortLevel::Low);
+        assert_eq!("MED".parse::<EffortLevel>().unwrap(), EffortLevel::Medium);
+        assert_eq!("max".parse::<EffortLevel>().unwrap(), EffortLevel::High);
+        assert!("nope".parse::<EffortLevel>().is_err());
+        assert_eq!(EffortLevel::Low.cycle().cycle().cycle(), EffortLevel::Low);
+        assert_eq!(EffortLevel::High.to_api_effort(), claudius::Effort::Max);
+    }
+
+    #[test]
+    fn usage_records_and_cache_rate() {
+        let mut u = UsageStats::default();
+        u.record_turn(100, 20, Some(50), Some(10));
+        assert_eq!(u.input_tokens, 100);
+        assert_eq!(u.output_tokens, 20);
+        assert_eq!(u.cache_read_tokens, 50);
+        assert_eq!(u.last_context_tokens, 160);
+        assert_eq!(u.turns, 1);
+        let rate = u.cache_hit_rate().unwrap();
+        assert!((rate - 50.0 / 160.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn session_from_config_login_flag() {
+        let mut cfg = Config::default();
+        cfg.model = "m".into();
+        cfg.base_url = "https://example.com".into();
+        let s = SessionState::from_config(&cfg, true);
+        assert!(s.logged_in);
+        assert_eq!(s.model, "m");
+        assert_eq!(s.prompt(), "❯ ");
+    }
+}

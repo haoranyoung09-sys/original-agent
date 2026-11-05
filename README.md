@@ -54,6 +54,21 @@ original --allow-shell
 | `/clear` | 清除当前对话；保留累计用量 |
 | `/help`、`/exit` | 帮助、退出 |
 
+### Vibe coding 工具
+
+自然语言改代码时，模型可调用（两端后端共用 schema）：
+
+| 工具 | 用途 |
+| --- | --- |
+| `project_overview` | 项目类型、浅层目录树、README 摘要 |
+| `glob` / `grep` | 无 shell 的文件发现与内容搜索 |
+| `read` / `edit` / `write` | 读、单处替换、整文件写 |
+| `multi_edit` | 跨文件多处唯一替换（先校验再写入） |
+| `verify` | 改后测试/构建回灌（需 `--allow-shell`，否则只给建议命令） |
+| `bash` | 任意命令（需 `--allow-shell`） |
+
+文件工具不出工作区；默认禁止 shell。详见 [SECURITY.md](SECURITY.md)。
+
 输入区采用连续上下横线，中间输入，底部显示“模型名 · 思考强度”。Shift+Tab 原位重绘，不追加提示行；设置 `NO_COLOR` 可禁用颜色。OpenAI 兼容后端尚未发送 reasoning_effort，颜色表示 UI 选择，不代表所有模型都支持该参数。
 
 ## 模型默认值
@@ -77,6 +92,6 @@ cargo clippy --locked --all-targets
 cargo build --locked --release
 ```
 
-GitHub CI 覆盖 Windows、Linux、macOS。源码位于 `src/`；vendored SDK 位于 `vendor/claudius/`。本次修改、验证范围及未解决限制归档于 `docs/archive/`。
+GitHub CI 覆盖 Windows、Linux、macOS。源码位于 `src/`；vendored SDK 位于 `vendor/claudius/`。本次修改、验证范围及未解决限制归档于 `docs/archive/`（含 [vibe coding 拓展与检验](docs/archive/2026-11-05-vibe-coding.md)）。
 
 [贡献指南](CONTRIBUTING.md) · [安全说明](SECURITY.md) · [MIT 许可证](LICENSE) · [第三方声明](THIRD_PARTY_NOTICES.md)

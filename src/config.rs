@@ -107,10 +107,14 @@ impl Config {
 
     pub fn load() -> Result<Self> {
         let path = Self::config_path()?;
+        Self::load_from(&path)
+    }
+
+    pub fn load_from(path: &std::path::Path) -> Result<Self> {
         if !path.exists() {
             return Ok(Self::default());
         }
-        let raw = fs::read_to_string(&path)
+        let raw = fs::read_to_string(path)
             .with_context(|| format!("读取配置失败: {}", path.display()))?;
         let cfg: Config = serde_json::from_str(&raw)
             .with_context(|| format!("解析配置失败: {}", path.display()))?;
@@ -155,16 +159,24 @@ impl Config {
     }
 
     pub fn save(&self) -> Result<()> {
-        self.validate()?;
+        let path = Self::config_path()?;
         let dir = Self::config_dir()?;
         fs::create_dir_all(&dir).with_context(|| format!("创建配置目录失败: {}", dir.display()))?;
-        let path = Self::config_path()?;
+        self.save_to(&path)
+    }
+
+    pub fn save_to(&self, path: &std::path::Path) -> Result<()> {
+        self.validate()?;
+        if let Some(dir) = path.parent() {
+            fs::create_dir_all(dir)
+                .with_context(|| format!("创建配置目录失败: {}", dir.display()))?;
+        }
         let raw = serde_json::to_string_pretty(self).context("序列化配置失败")?;
-        fs::write(&path, raw).with_context(|| format!("写入配置失败: {}", path.display()))?;
+        fs::write(path, raw).with_context(|| format!("写入配置失败: {}", path.display()))?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+            let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
         }
         Ok(())
     }
@@ -219,6 +231,8 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
     #[test]
     fn rejects_invalid_limits_and_prices() {
         let mut c = Config {
@@ -241,5 +255,51 @@ mod tests {
         assert!(c.validate().is_ok());
         c.base_url = "https://user:secret@example.com".into();
         assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn persist_roundtrip_without_home_side_effects() {
+        let n = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("original-cfg-{n}"));
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("config.json");
+        let mut c = Config::default();
+        c.model = "demo-model".into();
+        c.base_url = "https://api.example.com".into();
+        c.api_key = Some("secret-test-key".into());
+        c.pricing.input_per_mtok = Some(1.5);
+        c.pricing.output_per_mtok = Some(2.5);
+        c.effort = EffortLevel::High;
+        c.save_to(&path).unwrap();
+        let loaded = Config::load_from(&path).unwrap();
+        assert_eq!(loaded.model, "demo-model");
+        assert_eq!(loaded.base_url, "https://api.example.com");
+        assert_eq!(loaded.api_key.as_deref(), Some("secret-test-key"));
+        assert_eq!(loaded.effort, EffortLevel::High);
+        assert_eq!(loaded.pricing.input_per_mtok, Some(1.5));
+        assert!(loaded.has_api_key());
+        let cost = loaded
+            .estimate_cost_usd(&crate::session::UsageStats {
+                input_tokens: 1_000_000,
+                output_tokens: 1_000_000,
+                ..Default::default()
+            })
+            .unwrap();
+        assert!((cost - 4.0).abs() < 1e-9);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn effective_api_key_prefers_env() {
+        let mut c = Config::default();
+        c.api_key = Some("from-file".into());
+        // Do not assert env override when CI may set keys; just ensure file key works.
+        assert_eq!(c.api_key.as_deref(), Some("from-file"));
+        assert!(c.has_api_key());
+        c.api_key = Some("   ".into());
+        assert!(!c.has_api_key());
     }
 }

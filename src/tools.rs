@@ -1,15 +1,9 @@
-//! Custom Pi-style tools: read / write / edit / bash (PowerShell on Windows).
+//! Custom Pi-style tools: read / write / edit / multi_edit / glob / grep /
+//! project_overview / verify / bash (PowerShell on Windows).
 
 use std::ops::ControlFlow;
 use std::path::PathBuf;
-use std::process::Command;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-static SHELL_ENABLED: AtomicBool = AtomicBool::new(false);
-pub fn set_shell_enabled(enabled: bool) {
-    SHELL_ENABLED.store(enabled, Ordering::Relaxed);
-}
-use std::time::Duration;
 
 use async_trait::async_trait;
 use claudius::{
@@ -19,7 +13,14 @@ use claudius::{
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::workspace::resolve_in_workspace;
+use crate::fsops::{
+    edit_once, glob_files, grep_workspace, multi_edit, project_overview, read_text, write_text,
+    FileEdit, ReadRange,
+};
+use crate::shell::execute_shell;
+use crate::tool_dispatch::run_verify;
+
+pub use crate::shell::set_shell_enabled;
 
 fn ok_result(tool_use_id: &str, text: String) -> Box<dyn IntermediateToolResult> {
     Box::new(ControlFlow::Continue(Ok(ToolResultBlock {
@@ -48,12 +49,10 @@ fn downcast_tool_result(intermediate: Box<dyn IntermediateToolResult>) -> ToolRe
     }
 }
 
-fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        let t: String = s.chars().take(max).collect();
-        format!("{t}\n…(truncated)")
+fn map_result(tool_use_id: &str, result: anyhow::Result<String>) -> Box<dyn IntermediateToolResult> {
+    match result {
+        Ok(text) => ok_result(tool_use_id, text),
+        Err(e) => err_result(tool_use_id, e.to_string()),
     }
 }
 
@@ -90,37 +89,17 @@ impl<A: Agent> ToolCallback<A> for ReadTool {
             Ok(v) => v,
             Err(e) => return err_result(&tool_use.id, format!("invalid read input: {e}")),
         };
-        let path = match resolve_in_workspace(&self.ctx.root, &input.path) {
-            Ok(p) => p,
-            Err(e) => return err_result(&tool_use.id, e.to_string()),
-        };
-        let content = match std::fs::read_to_string(&path) {
-            Ok(c) => c,
-            Err(e) => {
-                return err_result(&tool_use.id, format!("read failed {}: {e}", path.display()))
-            }
-        };
-        let lines: Vec<&str> = content.lines().collect();
-        let start = input.offset.unwrap_or(1).saturating_sub(1);
-        let end = match input.limit {
-            Some(lim) => start.saturating_add(lim).min(lines.len()),
-            None => lines.len(),
-        };
-        if start >= lines.len() {
-            return ok_result(
-                &tool_use.id,
-                format!(
-                    "(file has {} lines; offset {} is past EOF)",
-                    lines.len(),
-                    start + 1
-                ),
-            );
-        }
-        let mut out = String::new();
-        for (i, line) in lines[start..end].iter().enumerate() {
-            out.push_str(&format!("{:>6}|{}\n", start + i + 1, line));
-        }
-        ok_result(&tool_use.id, truncate(&out, 80_000))
+        map_result(
+            &tool_use.id,
+            read_text(
+                &self.ctx.root,
+                &input.path,
+                ReadRange {
+                    offset: input.offset,
+                    limit: input.limit,
+                },
+            ),
+        )
     }
 
     async fn apply_tool_result(
@@ -190,25 +169,10 @@ impl<A: Agent> ToolCallback<A> for WriteTool {
             Ok(v) => v,
             Err(e) => return err_result(&tool_use.id, format!("invalid write input: {e}")),
         };
-        let path = match resolve_in_workspace(&self.ctx.root, &input.path) {
-            Ok(p) => p,
-            Err(e) => return err_result(&tool_use.id, e.to_string()),
-        };
-        if let Some(parent) = path.parent() {
-            if let Err(e) = std::fs::create_dir_all(parent) {
-                return err_result(&tool_use.id, format!("mkdir {}: {e}", parent.display()));
-            }
-        }
-        match std::fs::write(&path, &input.content) {
-            Ok(()) => ok_result(
-                &tool_use.id,
-                format!("wrote {} bytes to {}", input.content.len(), path.display()),
-            ),
-            Err(e) => err_result(
-                &tool_use.id,
-                format!("write failed {}: {e}", path.display()),
-            ),
-        }
+        map_result(
+            &tool_use.id,
+            write_text(&self.ctx.root, &input.path, &input.content),
+        )
     }
 
     async fn apply_tool_result(
@@ -276,46 +240,10 @@ impl<A: Agent> ToolCallback<A> for EditTool {
             Ok(v) => v,
             Err(e) => return err_result(&tool_use.id, format!("invalid edit input: {e}")),
         };
-        if input.old_str.is_empty() {
-            return err_result(&tool_use.id, "old_str must not be empty".to_string());
-        }
-        let path = match resolve_in_workspace(&self.ctx.root, &input.path) {
-            Ok(p) => p,
-            Err(e) => return err_result(&tool_use.id, e.to_string()),
-        };
-        let content = match std::fs::read_to_string(&path) {
-            Ok(c) => c,
-            Err(e) => {
-                return err_result(
-                    &tool_use.id,
-                    format!("edit read failed {}: {e}", path.display()),
-                )
-            }
-        };
-        let matches = content.matches(&input.old_str).count();
-        if matches == 0 {
-            return err_result(
-                &tool_use.id,
-                "old_str not found in file (make sure it matches exactly, including whitespace)"
-                    .to_string(),
-            );
-        }
-        if matches > 1 {
-            return err_result(
-                &tool_use.id,
-                format!(
-                    "old_str found {matches} times; provide a unique snippet so exactly one match is replaced"
-                ),
-            );
-        }
-        let updated = content.replacen(&input.old_str, &input.new_str, 1);
-        match std::fs::write(&path, updated) {
-            Ok(()) => ok_result(
-                &tool_use.id,
-                format!("edited {} (1 replacement)", path.display()),
-            ),
-            Err(e) => err_result(&tool_use.id, format!("edit write failed: {e}")),
-        }
+        map_result(
+            &tool_use.id,
+            edit_once(&self.ctx.root, &input.path, &input.old_str, &input.new_str),
+        )
     }
 
     async fn apply_tool_result(
@@ -361,6 +289,380 @@ impl<A: Agent> Tool<A> for EditTool {
     }
 }
 
+/* -------------------- multi_edit -------------------- */
+
+pub struct MultiEditTool {
+    pub ctx: ToolCtx,
+}
+
+#[derive(Deserialize)]
+struct MultiEditItem {
+    path: String,
+    old_str: String,
+    new_str: String,
+}
+
+#[derive(Deserialize)]
+struct MultiEditInput {
+    edits: Vec<MultiEditItem>,
+}
+
+#[async_trait]
+impl<A: Agent> ToolCallback<A> for MultiEditTool {
+    async fn compute_tool_result(
+        &self,
+        _client: &Anthropic,
+        _agent: &A,
+        tool_use: &ToolUseBlock,
+    ) -> Box<dyn IntermediateToolResult> {
+        let input: MultiEditInput = match serde_json::from_value(tool_use.input.clone()) {
+            Ok(v) => v,
+            Err(e) => return err_result(&tool_use.id, format!("invalid multi_edit input: {e}")),
+        };
+        let edits: Vec<FileEdit> = input
+            .edits
+            .into_iter()
+            .map(|e| FileEdit {
+                path: e.path,
+                old_str: e.old_str,
+                new_str: e.new_str,
+            })
+            .collect();
+        map_result(&tool_use.id, multi_edit(&self.ctx.root, &edits))
+    }
+
+    async fn apply_tool_result(
+        &self,
+        _client: &Anthropic,
+        _agent: &mut A,
+        _tool_use: &ToolUseBlock,
+        intermediate: Box<dyn IntermediateToolResult>,
+    ) -> ToolResult {
+        downcast_tool_result(intermediate)
+    }
+}
+
+impl<A: Agent> Tool<A> for MultiEditTool {
+    fn name(&self) -> String {
+        "multi_edit".to_string()
+    }
+
+    fn callback(&self) -> Box<dyn ToolCallback<A> + '_> {
+        Box::new(MultiEditTool {
+            ctx: self.ctx.clone(),
+        })
+    }
+
+    fn to_param(&self) -> ToolUnionParam {
+        ToolUnionParam::CustomTool(
+            ToolParam::new(
+                "multi_edit".to_string(),
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "edits": {
+                            "type": "array",
+                            "description": "Ordered unique str_replace edits; all validated before any write",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "path": { "type": "string" },
+                                    "old_str": { "type": "string" },
+                                    "new_str": { "type": "string" }
+                                },
+                                "required": ["path", "old_str", "new_str"]
+                            }
+                        }
+                    },
+                    "required": ["edits"]
+                }),
+            )
+            .with_description(
+                "Apply multiple unique string replacements across one or more workspace files in one batch."
+                    .to_string(),
+            ),
+        )
+    }
+}
+
+/* -------------------- glob -------------------- */
+
+pub struct GlobTool {
+    pub ctx: ToolCtx,
+}
+
+#[derive(Deserialize)]
+struct GlobInput {
+    pattern: String,
+}
+
+#[async_trait]
+impl<A: Agent> ToolCallback<A> for GlobTool {
+    async fn compute_tool_result(
+        &self,
+        _client: &Anthropic,
+        _agent: &A,
+        tool_use: &ToolUseBlock,
+    ) -> Box<dyn IntermediateToolResult> {
+        let input: GlobInput = match serde_json::from_value(tool_use.input.clone()) {
+            Ok(v) => v,
+            Err(e) => return err_result(&tool_use.id, format!("invalid glob input: {e}")),
+        };
+        map_result(&tool_use.id, glob_files(&self.ctx.root, &input.pattern))
+    }
+
+    async fn apply_tool_result(
+        &self,
+        _client: &Anthropic,
+        _agent: &mut A,
+        _tool_use: &ToolUseBlock,
+        intermediate: Box<dyn IntermediateToolResult>,
+    ) -> ToolResult {
+        downcast_tool_result(intermediate)
+    }
+}
+
+impl<A: Agent> Tool<A> for GlobTool {
+    fn name(&self) -> String {
+        "glob".to_string()
+    }
+
+    fn callback(&self) -> Box<dyn ToolCallback<A> + '_> {
+        Box::new(GlobTool {
+            ctx: self.ctx.clone(),
+        })
+    }
+
+    fn to_param(&self) -> ToolUnionParam {
+        ToolUnionParam::CustomTool(
+            ToolParam::new(
+                "glob".to_string(),
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "pattern": { "type": "string", "description": "Glob relative to workspace, e.g. src/**/*.rs" }
+                    },
+                    "required": ["pattern"]
+                }),
+            )
+            .with_description(
+                "List workspace files matching a glob (* ? **/). No shell required.".to_string(),
+            ),
+        )
+    }
+}
+
+/* -------------------- grep -------------------- */
+
+pub struct GrepTool {
+    pub ctx: ToolCtx,
+}
+
+#[derive(Deserialize)]
+struct GrepInput {
+    query: String,
+    #[serde(default)]
+    glob: Option<String>,
+}
+
+#[async_trait]
+impl<A: Agent> ToolCallback<A> for GrepTool {
+    async fn compute_tool_result(
+        &self,
+        _client: &Anthropic,
+        _agent: &A,
+        tool_use: &ToolUseBlock,
+    ) -> Box<dyn IntermediateToolResult> {
+        let input: GrepInput = match serde_json::from_value(tool_use.input.clone()) {
+            Ok(v) => v,
+            Err(e) => return err_result(&tool_use.id, format!("invalid grep input: {e}")),
+        };
+        map_result(
+            &tool_use.id,
+            grep_workspace(&self.ctx.root, &input.query, input.glob.as_deref()),
+        )
+    }
+
+    async fn apply_tool_result(
+        &self,
+        _client: &Anthropic,
+        _agent: &mut A,
+        _tool_use: &ToolUseBlock,
+        intermediate: Box<dyn IntermediateToolResult>,
+    ) -> ToolResult {
+        downcast_tool_result(intermediate)
+    }
+}
+
+impl<A: Agent> Tool<A> for GrepTool {
+    fn name(&self) -> String {
+        "grep".to_string()
+    }
+
+    fn callback(&self) -> Box<dyn ToolCallback<A> + '_> {
+        Box::new(GrepTool {
+            ctx: self.ctx.clone(),
+        })
+    }
+
+    fn to_param(&self) -> ToolUnionParam {
+        ToolUnionParam::CustomTool(
+            ToolParam::new(
+                "grep".to_string(),
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "Literal substring to find" },
+                        "glob": { "type": "string", "description": "Optional file glob filter" }
+                    },
+                    "required": ["query"]
+                }),
+            )
+            .with_description(
+                "Search workspace file contents (literal). Optional glob filter. No shell."
+                    .to_string(),
+            ),
+        )
+    }
+}
+
+/* -------------------- project_overview -------------------- */
+
+pub struct ProjectOverviewTool {
+    pub ctx: ToolCtx,
+}
+
+#[async_trait]
+impl<A: Agent> ToolCallback<A> for ProjectOverviewTool {
+    async fn compute_tool_result(
+        &self,
+        _client: &Anthropic,
+        _agent: &A,
+        tool_use: &ToolUseBlock,
+    ) -> Box<dyn IntermediateToolResult> {
+        map_result(&tool_use.id, project_overview(&self.ctx.root))
+    }
+
+    async fn apply_tool_result(
+        &self,
+        _client: &Anthropic,
+        _agent: &mut A,
+        _tool_use: &ToolUseBlock,
+        intermediate: Box<dyn IntermediateToolResult>,
+    ) -> ToolResult {
+        downcast_tool_result(intermediate)
+    }
+}
+
+impl<A: Agent> Tool<A> for ProjectOverviewTool {
+    fn name(&self) -> String {
+        "project_overview".to_string()
+    }
+
+    fn callback(&self) -> Box<dyn ToolCallback<A> + '_> {
+        Box::new(ProjectOverviewTool {
+            ctx: self.ctx.clone(),
+        })
+    }
+
+    fn to_param(&self) -> ToolUnionParam {
+        ToolUnionParam::CustomTool(
+            ToolParam::new(
+                "project_overview".to_string(),
+                json!({ "type": "object", "properties": {} }),
+            )
+            .with_description(
+                "Summarize project type, shallow tree, and README snippet for orientation."
+                    .to_string(),
+            ),
+        )
+    }
+}
+
+/* -------------------- verify -------------------- */
+
+pub struct VerifyTool {
+    pub ctx: ToolCtx,
+}
+
+#[derive(Deserialize)]
+struct VerifyInput {
+    #[serde(default)]
+    command: Option<String>,
+    #[serde(default)]
+    timeout_secs: Option<u64>,
+}
+
+#[async_trait]
+impl<A: Agent> ToolCallback<A> for VerifyTool {
+    async fn compute_tool_result(
+        &self,
+        _client: &Anthropic,
+        _agent: &A,
+        tool_use: &ToolUseBlock,
+    ) -> Box<dyn IntermediateToolResult> {
+        let input: VerifyInput = match serde_json::from_value(tool_use.input.clone()) {
+            Ok(v) => v,
+            Err(e) => return err_result(&tool_use.id, format!("invalid verify input: {e}")),
+        };
+        let timeout = input.timeout_secs.unwrap_or(180).clamp(1, 600);
+        let root = self.ctx.root.as_path().to_path_buf();
+        let command = input.command.clone();
+        let body = tokio::task::spawn_blocking(move || {
+            run_verify(&root, command.as_deref(), timeout)
+        })
+        .await
+        .unwrap_or_else(|e| format!("verify join error: {e}"));
+        // Informational block / no-command messages are ok; non-zero exit is an error.
+        if body.contains("exit_code:") && !body.contains("exit_code: 0") {
+            err_result(&tool_use.id, body)
+        } else {
+            ok_result(&tool_use.id, body)
+        }
+    }
+
+    async fn apply_tool_result(
+        &self,
+        _client: &Anthropic,
+        _agent: &mut A,
+        _tool_use: &ToolUseBlock,
+        intermediate: Box<dyn IntermediateToolResult>,
+    ) -> ToolResult {
+        downcast_tool_result(intermediate)
+    }
+}
+
+impl<A: Agent> Tool<A> for VerifyTool {
+    fn name(&self) -> String {
+        "verify".to_string()
+    }
+
+    fn callback(&self) -> Box<dyn ToolCallback<A> + '_> {
+        Box::new(VerifyTool {
+            ctx: self.ctx.clone(),
+        })
+    }
+
+    fn to_param(&self) -> ToolUnionParam {
+        ToolUnionParam::CustomTool(
+            ToolParam::new(
+                "verify".to_string(),
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "command": { "type": "string", "description": "Optional override; default auto-detects cargo/npm/pytest/go" },
+                        "timeout_secs": { "type": "integer", "description": "Timeout seconds (default 180, max 600)" }
+                    }
+                }),
+            )
+            .with_description(
+                "Run build/test feedback after edits. Requires --allow-shell; without it returns a suggested command."
+                    .to_string(),
+            ),
+        )
+    }
+}
+
 /* -------------------- bash / shell -------------------- */
 
 pub struct BashTool {
@@ -372,99 +674,6 @@ struct BashInput {
     command: String,
     #[serde(default)]
     timeout_secs: Option<u64>,
-}
-
-/// Run a shell command in `cwd` with a soft timeout.
-pub fn execute_shell(command: &str, cwd: &PathBuf, timeout_secs: u64) -> (i32, String, String) {
-    if !SHELL_ENABLED.load(Ordering::Relaxed) {
-        return (
-            126,
-            String::new(),
-            "Shell disabled; restart with --allow-shell to authorize unrestricted commands.".into(),
-        );
-    }
-    use std::io::Read;
-    use std::process::Stdio;
-    #[cfg(windows)]
-    let mut cmd = {
-        let mut c = Command::new("powershell");
-        c.args(["-NoProfile", "-NonInteractive", "-Command", command]);
-        c
-    };
-    #[cfg(not(windows))]
-    let mut cmd = {
-        let mut c = Command::new("sh");
-        c.args(["-c", command]);
-        c
-    };
-    let mut child = match cmd
-        .current_dir(cwd)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-    {
-        Ok(c) => c,
-        Err(e) => return (1, String::new(), e.to_string()),
-    };
-    fn drain<R: Read + Send + 'static>(mut reader: R) -> std::thread::JoinHandle<String> {
-        std::thread::spawn(move || {
-            let mut saved = Vec::new();
-            let mut buf = [0u8; 8192];
-            while let Ok(n) = reader.read(&mut buf) {
-                if n == 0 {
-                    break;
-                }
-                let keep = n.min(80_000usize.saturating_sub(saved.len()));
-                saved.extend_from_slice(&buf[..keep]);
-            }
-            String::from_utf8_lossy(&saved).into_owned()
-        })
-    }
-    let out = drain(child.stdout.take().unwrap());
-    let err = drain(child.stderr.take().unwrap());
-    let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs.clamp(1, 600));
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                // Allow pipe readers to drain without waiting indefinitely for descendants.
-                let drain_deadline = std::time::Instant::now() + Duration::from_millis(200);
-                while !(out.is_finished() && err.is_finished())
-                    && std::time::Instant::now() < drain_deadline
-                {
-                    std::thread::sleep(Duration::from_millis(5));
-                }
-                let stdout = if out.is_finished() {
-                    out.join().unwrap_or_default()
-                } else {
-                    String::new()
-                };
-                let stderr = if err.is_finished() {
-                    err.join().unwrap_or_default()
-                } else {
-                    String::new()
-                };
-                return (status.code().unwrap_or(1), stdout, stderr);
-            }
-            Ok(None) if std::time::Instant::now() < deadline => {
-                std::thread::sleep(Duration::from_millis(20))
-            }
-            _ => {
-                #[cfg(windows)]
-                {
-                    let _ = Command::new("taskkill")
-                        .args(["/PID", &child.id().to_string(), "/T", "/F"])
-                        .output();
-                }
-                let _ = child.kill();
-                let _ = child.wait();
-                return (
-                    124,
-                    String::new(),
-                    "Shell timed out and termination was requested".into(),
-                );
-            }
-        }
-    }
 }
 
 #[async_trait]
@@ -533,9 +742,9 @@ impl<A: Agent> Tool<A> for BashTool {
 
     fn to_param(&self) -> ToolUnionParam {
         let shell_hint = if cfg!(windows) {
-            "Run a shell command in the workspace via PowerShell (-Command)."
+            "Run a shell command in the workspace via PowerShell (-Command). Requires --allow-shell."
         } else {
-            "Run a shell command in the workspace via /bin/sh -c."
+            "Run a shell command in the workspace via /bin/sh -c. Requires --allow-shell."
         };
         ToolUnionParam::CustomTool(
             ToolParam::new(
@@ -551,5 +760,14 @@ impl<A: Agent> Tool<A> for BashTool {
             )
             .with_description(shell_hint.to_string()),
         )
+    }
+}
+
+fn truncate(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let t: String = s.chars().take(max).collect();
+        format!("{t}\n…(truncated)")
     }
 }

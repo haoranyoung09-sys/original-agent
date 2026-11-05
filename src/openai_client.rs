@@ -7,8 +7,8 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::tools::{execute_shell, ToolCtx};
-use crate::workspace::resolve_in_workspace;
+use crate::tool_dispatch::{dispatch, openai_tool_defs};
+use crate::tools::ToolCtx;
 
 #[derive(Debug, Clone, Default)]
 pub struct OpenAiUsage {
@@ -50,6 +50,11 @@ impl OpenAiClient {
             format!("{b}/chat/completions")
         }
     }
+
+    #[cfg(test)]
+    pub fn completions_url_for_test(&self) -> String {
+        self.completions_url()
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -65,194 +70,19 @@ pub struct ChatMessage {
     pub name: Option<String>,
 }
 
-fn tool_defs() -> Value {
-    json!([
-        {
-            "type": "function",
-            "function": {
-                "name": "read",
-                "description": "Read a text file from the workspace.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "path": { "type": "string" },
-                        "offset": { "type": "integer" },
-                        "limit": { "type": "integer" }
-                    },
-                    "required": ["path"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "write",
-                "description": "Create or overwrite a text file.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "path": { "type": "string" },
-                        "content": { "type": "string" }
-                    },
-                    "required": ["path", "content"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "edit",
-                "description": "Replace a unique exact string in a file.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "path": { "type": "string" },
-                        "old_str": { "type": "string" },
-                        "new_str": { "type": "string" }
-                    },
-                    "required": ["path", "old_str", "new_str"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "bash",
-                "description": "Run a shell command in the workspace.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "command": { "type": "string" },
-                        "timeout_secs": { "type": "integer" }
-                    },
-                    "required": ["command"]
-                }
-            }
-        }
-    ])
-}
-
 fn system_prompt(cwd: &Path) -> String {
     let shell = if cfg!(windows) {
-        "Windows PowerShell"
+        "Windows PowerShell（bash/verify 默认禁用，需 --allow-shell）"
     } else {
-        "POSIX sh"
+        "POSIX sh（bash/verify 默认禁用，需 --allow-shell）"
     };
     format!(
-        "你是 original，一个运行在本地工作区中的终端 coding agent。\n\
+        "你是 original，一个运行在本地工作区中的终端 vibe-coding agent。\n\
          工作区: {}\nShell: {shell}\n\
-         工具: read / write / edit / bash。路径相对工作区；改前先 read；不要编造文件内容。",
+         工具: project_overview / glob / grep / read / write / edit / multi_edit / verify / bash。\n\
+         先摸清项目再改；路径相对工作区；小改 edit、多处 multi_edit；不要编造文件内容。",
         cwd.display()
     )
-}
-
-fn run_tool(name: &str, args: &Value, root: &Path) -> String {
-    let ctx_root = root.to_path_buf();
-    match name {
-        "read" => {
-            let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
-            let offset = args
-                .get("offset")
-                .and_then(|v| v.as_u64())
-                .map(|n| n as usize);
-            let limit = args
-                .get("limit")
-                .and_then(|v| v.as_u64())
-                .map(|n| n as usize);
-            match resolve_in_workspace(&ctx_root, path) {
-                Ok(p) => match std::fs::read_to_string(&p) {
-                    Ok(content) => {
-                        let lines: Vec<&str> = content.lines().collect();
-                        let start = offset.unwrap_or(1).saturating_sub(1);
-                        let end = match limit {
-                            Some(lim) => start.saturating_add(lim).min(lines.len()),
-                            None => lines.len(),
-                        };
-                        if start >= lines.len() {
-                            format!("(file has {} lines; offset past EOF)", lines.len())
-                        } else {
-                            let mut out = String::new();
-                            for (i, line) in lines[start..end].iter().enumerate() {
-                                out.push_str(&format!("{:>6}|{}\n", start + i + 1, line));
-                            }
-                            out
-                        }
-                    }
-                    Err(e) => format!("read failed: {e}"),
-                },
-                Err(e) => e.to_string(),
-            }
-        }
-        "write" => {
-            let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
-            let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
-            match resolve_in_workspace(&ctx_root, path) {
-                Ok(p) => {
-                    if let Some(parent) = p.parent() {
-                        let _ = std::fs::create_dir_all(parent);
-                    }
-                    match std::fs::write(&p, content) {
-                        Ok(()) => format!("wrote {} bytes to {}", content.len(), p.display()),
-                        Err(e) => format!("write failed: {e}"),
-                    }
-                }
-                Err(e) => e.to_string(),
-            }
-        }
-        "edit" => {
-            let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
-            let old = args.get("old_str").and_then(|v| v.as_str()).unwrap_or("");
-            let new = args.get("new_str").and_then(|v| v.as_str()).unwrap_or("");
-            if old.is_empty() {
-                return "old_str must not be empty".into();
-            }
-            match resolve_in_workspace(&ctx_root, path) {
-                Ok(p) => match std::fs::read_to_string(&p) {
-                    Ok(content) => {
-                        let matches = content.matches(old).count();
-                        if matches == 0 {
-                            "old_str not found".into()
-                        } else if matches > 1 {
-                            format!("old_str found {matches} times; need unique snippet")
-                        } else {
-                            let updated = content.replacen(old, new, 1);
-                            match std::fs::write(&p, updated) {
-                                Ok(()) => format!("edited {} (1 replacement)", p.display()),
-                                Err(e) => format!("edit write failed: {e}"),
-                            }
-                        }
-                    }
-                    Err(e) => format!("edit read failed: {e}"),
-                },
-                Err(e) => e.to_string(),
-            }
-        }
-        "bash" => {
-            let command = args.get("command").and_then(|v| v.as_str()).unwrap_or("");
-            let timeout = args
-                .get("timeout_secs")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(60)
-                .clamp(1, 600);
-            if command.trim().is_empty() {
-                return "command must not be empty".into();
-            }
-            let (code, stdout, stderr) = execute_shell(command, &ctx_root, timeout);
-            let mut body = format!("exit_code: {code}\n");
-            if !stdout.is_empty() {
-                body.push_str("stdout:\n");
-                body.push_str(&stdout);
-                body.push('\n');
-            }
-            if !stderr.is_empty() {
-                body.push_str("stderr:\n");
-                body.push_str(&stderr);
-                body.push('\n');
-            }
-            body
-        }
-        other => format!("unknown tool: {other}"),
-    }
 }
 
 fn extract_usage(v: &Value) -> OpenAiUsage {
@@ -268,7 +98,6 @@ fn extract_usage(v: &Value) -> OpenAiUsage {
         })
         .and_then(|x| x.as_i64())
         .unwrap_or(0) as i32;
-    // Some gateways expose prompt_tokens_details.cached_tokens
     let cache_read = u
         .and_then(|u| u.get("prompt_tokens_details"))
         .and_then(|d| d.get("cached_tokens"))
@@ -316,7 +145,7 @@ pub async fn take_turn(
         let body = json!({
             "model": model,
             "messages": history,
-            "tools": tool_defs(),
+            "tools": openai_tool_defs(),
             "tool_choice": "auto",
             "max_tokens": max_tokens,
         });
@@ -366,7 +195,6 @@ pub async fn take_turn(
                 println!("assistant:\n{s}\n");
             }
         } else if let Some(Value::Array(parts)) = &content {
-            // Some models return content parts
             let mut buf = String::new();
             for p in parts {
                 if let Some(t) = p.get("text").and_then(|x| x.as_str()) {
@@ -407,7 +235,7 @@ pub async fn take_turn(
                 args_raw.to_string()
             };
             println!("  → tool {fname}({short})");
-            let result = run_tool(&fname, &args, cwd);
+            let result = dispatch(&fname, &args, cwd);
             let preview: String = result.chars().take(120).collect();
             println!("  ✓ {}", preview.replace('\n', " "));
             history.push(ChatMessage {
@@ -421,4 +249,50 @@ pub async fn take_turn(
     }
 
     bail!("工具循环超过上限")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn completions_url_variants() {
+        let a = OpenAiClient::new("k".into(), "https://api.openai.com/v1").unwrap();
+        assert_eq!(
+            a.completions_url_for_test(),
+            "https://api.openai.com/v1/chat/completions"
+        );
+        let b = OpenAiClient::new("k".into(), "https://api.deepseek.com").unwrap();
+        assert_eq!(
+            b.completions_url_for_test(),
+            "https://api.deepseek.com/chat/completions"
+        );
+        let c = OpenAiClient::new("k".into(), "https://x.test/v1/chat/completions").unwrap();
+        assert_eq!(
+            c.completions_url_for_test(),
+            "https://x.test/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn usage_extracts_cached_tokens() {
+        let v = serde_json::json!({
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 3,
+                "prompt_tokens_details": { "cached_tokens": 4 }
+            }
+        });
+        let u = extract_usage(&v);
+        assert_eq!(u.input_tokens, 10);
+        assert_eq!(u.output_tokens, 3);
+        assert_eq!(u.cache_read_tokens, Some(4));
+    }
+
+    #[test]
+    fn system_prompt_lists_vibe_tools() {
+        let p = system_prompt(Path::new("/tmp/demo"));
+        assert!(p.contains("multi_edit"));
+        assert!(p.contains("project_overview"));
+    }
 }
