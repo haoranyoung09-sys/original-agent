@@ -30,3 +30,15 @@ try {
     if ($_.Exception.Message -notlike '*curl download failed (exit 28)*') { throw }
     Write-Output 'PASS: transport failure falls back and reports timeout'
 }
+
+function curl.exe {
+    if ($args -notcontains '--retry-all-errors') { throw 'Missing connection reset retry option' }
+    $global:LASTEXITCODE = 56
+}
+try {
+    & $Installer
+    throw 'Expected connection reset failure'
+} catch {
+    if ($_.Exception.Message -notlike '*curl download failed (exit 56)*') { throw }
+    Write-Output 'PASS: reset retries configured and reset diagnostic preserved'
+}

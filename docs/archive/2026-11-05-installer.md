@@ -14,3 +14,6 @@
 
 截图定位到 Invoke-WebRequest 下载阶段。本机 curl 访问同一 Release 资源连接超时（exit 28），未确认远程附件存在性。增加 30 秒 PowerShell 下载超时、curl.exe 后备下载及两次重试，保留 HTTPS 证书验证；增加 404 与网络/TLS 错误说明。Windows PowerShell 5.1 模拟测试三项通过，包括连接失败后备超时；真实下载仍受网络阻塞。
 
+
+连接重置处理：curl 后备下载加入 --retry-all-errors 与 90 秒重试预算，明确提示 exit 56。用户选择先关闭代理，未更改系统代理设置。Windows PowerShell 5.1 四项模拟测试通过；实际网络下载仍需验证。
+

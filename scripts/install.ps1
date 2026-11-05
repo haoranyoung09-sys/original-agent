@@ -22,10 +22,10 @@ function Get-ReleaseFile {
             throw "GitHub download failed. Check network/proxy access to GitHub. $($_.Exception.Message)"
         }
         Write-Host 'PowerShell download failed; retrying with curl.exe...'
-        & curl.exe --fail --location --retry 2 --connect-timeout 10 --max-time 120 --proto '=https' --proto-redir '=https' --output $OutFile $Url
+        & curl.exe --fail --location --retry 2 --retry-all-errors --retry-max-time 90 --connect-timeout 10 --max-time 120 --proto '=https' --proto-redir '=https' --output $OutFile $Url
         $DownloadExit = $LASTEXITCODE
         if ($DownloadExit -ne 0) {
-            throw "curl download failed (exit $DownloadExit). Exit 22: HTTP error (check Release assets); 28: timeout; 35/60: TLS/certificate failure. Check network/proxy and https://github.com/$Repo/releases. URL: $Url"
+            throw "curl download failed (exit $DownloadExit). Exit 22: HTTP error (check Release assets); 28: timeout; 56: connection reset (check proxy/network); 35/60: TLS/certificate failure. Check network/proxy and https://github.com/$Repo/releases. URL: $Url"
         }
     }
 }
