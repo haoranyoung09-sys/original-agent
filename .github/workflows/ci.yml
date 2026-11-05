@@ -18,21 +18,18 @@ jobs:
       - run: cargo clippy --locked --all-targets
       - run: cargo build --locked --release
   installer:
+    # Do not use shell: ${{ matrix.shell }} — GitHub evaluates `shell` before the
+    # matrix context exists and fails with: Unrecognized named-value: 'matrix'.
     strategy:
+      fail-fast: false
       matrix:
-        include:
-          - os: windows-latest
-            shell: pwsh
-            run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-installer.ps1
-          - os: ubuntu-22.04
-            shell: bash
-            run: sh scripts/test-installer.sh
-          - os: macos-15
-            shell: bash
-            run: sh scripts/test-installer.sh
+        os: [windows-latest, ubuntu-22.04, macos-15]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: Offline installer fixture tests
-        shell: ${{ matrix.shell }}
-        run: ${{ matrix.run }}
+      - name: Offline installer fixture tests (Windows)
+        if: runner.os == 'Windows'
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-installer.ps1
+      - name: Offline installer fixture tests (Unix)
+        if: runner.os != 'Windows'
+        run: sh scripts/test-installer.sh
