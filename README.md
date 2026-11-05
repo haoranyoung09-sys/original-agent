@@ -4,23 +4,33 @@ Rust 编写的多厂商终端 coding agent，交互参考 [Pi](https://github.co
 
 ## 安装
 
-无需 Rust 的安装方式（首次发布 Release 后可用）：
+无需 Rust 的安装方式（预编译 Release；本机不必安装 Rust 工具链）：
 
-Windows PowerShell：
+Windows PowerShell（x64）：
 
 ```powershell
 irm https://raw.githubusercontent.com/haoranyoung09-sys/original-agent/main/scripts/install.ps1 | iex
 ```
 
+固定版本：
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/haoranyoung09-sys/original-agent/main/scripts/install.ps1))) -Version v0.3.3
+```
+
+或先下载脚本再执行：`powershell -File install.ps1 -Version v0.3.3`。
+
 Linux x64 / macOS Intel、Apple Silicon：
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/haoranyoung09-sys/original-agent/main/scripts/install.sh | sh
+# 固定版本：下载脚本后
+sh install.sh v0.3.3
 ```
 
-脚本下载 GitHub Release 并校验 SHA-256。Windows 自动添加用户 PATH；Unix 安装到 `~/.local/bin`，若尚未在 PATH 会提示配置命令。Linux 版本基于 Ubuntu 22.04，需要兼容 glibc 和 OpenSSL 运行库。更新时重复安装命令；固定版本可下载脚本后传入 `v0.3.3`（PowerShell 使用 `-Version v0.3.3`）。
+脚本下载 GitHub Release 附件并校验 SHA-256。Windows 安装到 `%USERPROFILE%\.original-agent\bin` 并写入用户 PATH；Unix 安装到 `~/.local/bin`，若尚未在 PATH 会打印 `export` 提示。Linux 构建基于 Ubuntu 22.04（需兼容 glibc）。更新时重复安装命令即可。
 
-维护者发布：提交并推送代码后，推送与 Cargo.toml 版本相同的标签（如 `v0.3.3`）；Release 工作流构建四个平台并发布附件。脚本校验完整性，不提供独立代码签名。首次 Release 完成前下载会失败，已有安装不会因此被替换。
+维护者发布：推送与 Cargo.toml 版本相同的标签（如 `v0.3.3`）；Release 工作流构建四个平台并附带 `.sha256`。脚本只做完整性校验，不提供独立代码签名。首次 Release 完成前远程安装会失败，不会覆盖已有安装。离线/自测可用 `-BaseUrl` / `ORIGINAL_INSTALL_BASE` 指向本地假 Release 目录，详见 [无 Rust 安装归档](docs/archive/2026-11-05-no-rust-install.md)。
 
 ### 从源码安装
 
@@ -90,8 +100,11 @@ cargo fmt --check
 cargo test --locked
 cargo clippy --locked --all-targets
 cargo build --locked --release
+# 无 Rust 安装脚本（本地 fixture，不访问 GitHub）
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-installer.ps1   # Windows
+sh scripts/test-installer.sh                                                   # Linux/macOS
 ```
 
-GitHub CI 覆盖 Windows、Linux、macOS。源码位于 `src/`；vendored SDK 位于 `vendor/claudius/`。本次修改、验证范围及未解决限制归档于 `docs/archive/`（含 [vibe coding 拓展与检验](docs/archive/2026-11-05-vibe-coding.md)）。
+GitHub CI 覆盖 Windows、Linux、macOS（含 installer fixture job）。源码位于 `src/`；vendored SDK 位于 `vendor/claudius/`。本次修改、验证范围及未解决限制归档于 `docs/archive/`（含 [vibe coding 拓展与检验](docs/archive/2026-11-05-vibe-coding.md)）。
 
 [贡献指南](CONTRIBUTING.md) · [安全说明](SECURITY.md) · [MIT 许可证](LICENSE) · [第三方声明](THIRD_PARTY_NOTICES.md)

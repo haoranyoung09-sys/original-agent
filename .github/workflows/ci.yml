@@ -17,3 +17,22 @@ jobs:
       - run: cargo test --locked
       - run: cargo clippy --locked --all-targets
       - run: cargo build --locked --release
+  installer:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            shell: pwsh
+            run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-installer.ps1
+          - os: ubuntu-22.04
+            shell: bash
+            run: sh scripts/test-installer.sh
+          - os: macos-15
+            shell: bash
+            run: sh scripts/test-installer.sh
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Offline installer fixture tests
+        shell: ${{ matrix.shell }}
+        run: ${{ matrix.run }}

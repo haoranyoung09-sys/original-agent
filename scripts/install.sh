@@ -1,27 +1,101 @@
 #!/usr/bin/env sh
+# Install prebuilt `original` from GitHub Releases (no Rust required).
+# Usage:
+#   curl -fsSL .../install.sh | sh
+#   sh install.sh v0.3.3
+# Overrides (for tests / mirrors):
+#   ORIGINAL_INSTALL_BASE  — HTTPS base URL, or a local directory with assets
+#   ORIGINAL_INSTALL_BIN   — install dir (default: ~/.local/bin)
+#   ORIGINAL_INSTALL_NO_PATH=1 — skip PATH hint only (Unix never mutates shell rc)
+
 set -eu
 version=${1:-latest}
-case "$version" in latest) ;; v[0-9]*.[0-9]*.[0-9]*) ;; *) echo 'Expected latest or vX.Y.Z' >&2; exit 1;; esac
-case "$version" in *[!a-zA-Z0-9.-]*) exit 1;; esac
+case "$version" in
+  latest) ;;
+  v[0-9]*.[0-9]*.[0-9]*) ;;
+  *) echo 'Expected latest or vX.Y.Z' >&2; exit 1 ;;
+esac
+case "$version" in
+  *[!a-zA-Z0-9.-]*) echo 'Invalid version characters' >&2; exit 1 ;;
+esac
+
 case "$(uname -s)/$(uname -m)" in
   Linux/x86_64) asset=original-linux-x86_64 ;;
   Darwin/arm64) asset=original-macos-aarch64 ;;
   Darwin/x86_64) asset=original-macos-x86_64 ;;
   *) echo 'Unsupported platform or architecture' >&2; exit 1 ;;
 esac
+
 repo=haoranyoung09-sys/original-agent
-if [ "$version" = latest ]; then
-  base="https://github.com/$repo/releases/latest/download"
+if [ -n "${ORIGINAL_INSTALL_BASE:-}" ]; then
+  base=${ORIGINAL_INSTALL_BASE%/}
 else
-  base="https://github.com/$repo/releases/download/$version"
+  if [ "$version" = latest ]; then
+    base="https://github.com/$repo/releases/latest/download"
+  else
+    base="https://github.com/$repo/releases/download/$version"
+  fi
 fi
-tmp=$(mktemp -d)
-trap 'rm -rf -- "$tmp"' EXIT HUP INT TERM
-curl --fail --location --proto '=https' --tlsv1.2 "$base/$asset" -o "$tmp/$asset"
-curl --fail --location --proto '=https' --tlsv1.2 "$base/$asset.sha256" -o "$tmp/$asset.sha256"
-(cd "$tmp"; if command -v sha256sum >/dev/null 2>&1; then sha256sum -c "$asset.sha256"; else shasum -a 256 -c "$asset.sha256"; fi)
-bin="$HOME/.local/bin"
+
+bin=${ORIGINAL_INSTALL_BIN:-"$HOME/.local/bin"}
 mkdir -p "$bin"
+
+tmp=$(mktemp -d)
+# portable trap cleanup
+trap 'rm -rf -- "$tmp"' EXIT HUP INT TERM
+
+fetch() {
+  # $1 = source name or URL leaf, $2 = dest path
+  src_name=$1
+  dest=$2
+  if [ -d "$base" ]; then
+    if [ ! -f "$base/$src_name" ]; then
+      echo "Local release asset not found: $base/$src_name" >&2
+      exit 1
+    fi
+    cp "$base/$src_name" "$dest"
+  else
+    curl --fail --location --retry 2 --retry-all-errors --retry-max-time 90 \
+      --connect-timeout 10 --max-time 120 \
+      --proto '=https' --proto-redir '=https' --tlsv1.2 \
+      "$base/$src_name" -o "$dest"
+  fi
+}
+
+fetch "$asset" "$tmp/$asset"
+fetch "$asset.sha256" "$tmp/$asset.sha256"
+
+# Normalize checksum file to "HASH  filename" if it only contains the hash.
+checksum_line=$(tr -d '\r' <"$tmp/$asset.sha256" | head -n 1)
+hash=${checksum_line%% *}
+rest=${checksum_line#"$hash"}
+if [ -z "$rest" ] || [ "$checksum_line" = "$hash" ]; then
+  printf '%s  %s\n' "$hash" "$asset" >"$tmp/$asset.sha256"
+fi
+
+(
+  cd "$tmp"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum -c "$asset.sha256"
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 -c "$asset.sha256"
+  else
+    echo 'Need sha256sum or shasum to verify the download' >&2
+    exit 1
+  fi
+)
+
 install -m 755 "$tmp/$asset" "$bin/original"
 printf '%s\n' "Installed $bin/original"
-case ":$PATH:" in *":$bin:"*) ;; *) printf '%s\n' 'Add ~/.local/bin to PATH: export PATH="$HOME/.local/bin:$PATH"';; esac
+
+if [ "${ORIGINAL_INSTALL_NO_PATH:-}" = 1 ]; then
+  printf '%s\n' 'PATH hint skipped (ORIGINAL_INSTALL_NO_PATH=1).'
+else
+  case ":$PATH:" in
+    *":$bin:"*) ;;
+    *)
+      printf '%s\n' "Add $bin to PATH, for example:"
+      printf '%s\n' "  export PATH=\"$bin:\$PATH\""
+      ;;
+  esac
+fi

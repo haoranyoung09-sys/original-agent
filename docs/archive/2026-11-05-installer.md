@@ -17,3 +17,4 @@
 
 连接重置处理：curl 后备下载加入 --retry-all-errors 与 90 秒重试预算，明确提示 exit 56。用户选择先关闭代理，未更改系统代理设置。Windows PowerShell 5.1 四项模拟测试通过；实际网络下载仍需验证。
 
+续篇：[无 Rust 终端安装完善（fixture 可测）](2026-11-05-no-rust-install.md)。

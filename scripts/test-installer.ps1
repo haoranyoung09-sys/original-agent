@@ -1,44 +1,104 @@
+# Offline installer tests for scripts/install.ps1 (Windows PowerShell 5.1+).
+# Uses local fixtures — never hits GitHub, never writes the real user PATH.
 $ErrorActionPreference = 'Stop'
-# Mock downloads only; neither test reaches installation or modifies PATH.
 $Installer = Join-Path $PSScriptRoot 'install.ps1'
-function Invoke-WebRequest {
-    param([switch]$UseBasicParsing, $OutFile, $Uri, $TimeoutSec, [Parameter(ValueFromRemainingArguments=$true)]$Rest)
-    Set-Content -LiteralPath $OutFile -Value '' -NoNewline
-}
-try {
-    & $Installer
-    throw 'Expected empty checksum rejection'
-} catch {
-    if ($_.Exception.Message -notlike '*checksum is empty*') { throw }
-    Write-Output 'PASS: empty checksum rejected without null-method error'
-}
-try {
-    & $Installer -Version '../invalid'
-    throw 'Expected invalid version rejection'
-} catch {
-    if ($_.Exception.Message -notlike '*Version must be*') { throw }
-    Write-Output 'PASS: invalid version rejected'
+$Pass = 0
+
+function Assert-ThrowsLike {
+    param([scriptblock]$Block, [string]$Pattern, [string]$Label)
+    try {
+        & $Block
+        throw "Expected failure for: $Label"
+    } catch {
+        $msg = [string]$_.Exception.Message
+        if ($msg -notlike $Pattern) {
+            throw "FAIL $Label`n  expected like: $Pattern`n  got: $msg"
+        }
+        Write-Output "PASS: $Label"
+        $script:Pass++
+    }
 }
 
-# Simulate a failed PowerShell transport and a failed curl fallback.
+# --- rejection paths (mock network) ---
+function Invoke-WebRequest {
+    param([switch]$UseBasicParsing, $OutFile, $Uri, $TimeoutSec, [Parameter(ValueFromRemainingArguments = $true)]$Rest)
+    Set-Content -LiteralPath $OutFile -Value '' -NoNewline
+}
+
+Assert-ThrowsLike -Label 'empty checksum rejected without null-method error' -Pattern '*checksum is empty*' -Block {
+    & $Installer -NoPathUpdate
+}
+
+Assert-ThrowsLike -Label 'invalid version rejected' -Pattern '*Version must be*' -Block {
+    & $Installer -Version '../invalid' -NoPathUpdate
+}
+
 function Invoke-WebRequest { throw 'Simulated connection closed' }
 function curl.exe { $global:LASTEXITCODE = 28 }
-try {
-    & $Installer
-    throw 'Expected download failure'
-} catch {
-    if ($_.Exception.Message -notlike '*curl download failed (exit 28)*') { throw }
-    Write-Output 'PASS: transport failure falls back and reports timeout'
+Assert-ThrowsLike -Label 'transport failure falls back and reports timeout' -Pattern '*curl download failed (exit 28)*' -Block {
+    & $Installer -NoPathUpdate
 }
 
 function curl.exe {
     if ($args -notcontains '--retry-all-errors') { throw 'Missing connection reset retry option' }
     $global:LASTEXITCODE = 56
 }
-try {
-    & $Installer
-    throw 'Expected connection reset failure'
-} catch {
-    if ($_.Exception.Message -notlike '*curl download failed (exit 56)*') { throw }
-    Write-Output 'PASS: reset retries configured and reset diagnostic preserved'
+Assert-ThrowsLike -Label 'reset retries configured and reset diagnostic preserved' -Pattern '*curl download failed (exit 56)*' -Block {
+    & $Installer -NoPathUpdate
 }
+
+# Clear network mocks so local fixture path is used (no Invoke-WebRequest needed).
+Remove-Item Function:Invoke-WebRequest -ErrorAction SilentlyContinue
+Remove-Item Function:curl.exe -ErrorAction SilentlyContinue
+
+# --- local fixture happy path + mismatch ---
+$FixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ("original-install-fixture-" + [Guid]::NewGuid().ToString('N'))
+$BinRoot = Join-Path ([IO.Path]::GetTempPath()) ("original-install-bin-" + [Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $FixtureRoot | Out-Null
+New-Item -ItemType Directory -Path $BinRoot | Out-Null
+try {
+    $Asset = 'original-windows-x86_64.exe'
+    $Payload = "original-fixture-binary-$([Guid]::NewGuid().ToString('N'))"
+    $AssetPath = Join-Path $FixtureRoot $Asset
+    [IO.File]::WriteAllText($AssetPath, $Payload)
+    $Hash = (Get-FileHash -LiteralPath $AssetPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    # Release workflow format: "<hex>  <filename>\n"
+    Set-Content -LiteralPath (Join-Path $FixtureRoot "$Asset.sha256") -Value "$Hash  $Asset`n" -NoNewline
+
+    $BeforeUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+
+    & $Installer -Version v0.3.3 -BaseUrl $FixtureRoot -BinDir $BinRoot -NoPathUpdate
+    $Dest = Join-Path $BinRoot 'original.exe'
+    if (-not (Test-Path -LiteralPath $Dest)) { throw 'FAIL happy path: original.exe missing' }
+    $Installed = [IO.File]::ReadAllText($Dest)
+    if ($Installed -ne $Payload) { throw 'FAIL happy path: installed bytes differ from fixture' }
+    $AfterUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    if ($AfterUserPath -ne $BeforeUserPath) {
+        throw 'FAIL happy path: user PATH changed despite -NoPathUpdate'
+    }
+    Write-Output 'PASS: local fixture installs with SHA-256 check and skips PATH'
+    $Pass++
+
+    # Fixed-version flag accepted with local base (no network).
+    & $Installer -Version latest -BaseUrl $FixtureRoot -BinDir $BinRoot -NoPathUpdate
+    Write-Output 'PASS: latest + local BaseUrl reinstalls'
+    $Pass++
+
+    # Checksum mismatch
+    Set-Content -LiteralPath (Join-Path $FixtureRoot "$Asset.sha256") -Value (("0" * 64) + "  $Asset`n") -NoNewline
+    Assert-ThrowsLike -Label 'checksum mismatch rejected' -Pattern '*Checksum mismatch*' -Block {
+        & $Installer -BaseUrl $FixtureRoot -BinDir $BinRoot -NoPathUpdate
+    }
+
+    # Missing local asset
+    Remove-Item -LiteralPath $AssetPath -Force
+    Assert-ThrowsLike -Label 'missing local asset rejected' -Pattern '*Local release asset not found*' -Block {
+        & $Installer -BaseUrl $FixtureRoot -BinDir $BinRoot -NoPathUpdate
+    }
+}
+finally {
+    Remove-Item -LiteralPath $FixtureRoot -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $BinRoot -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+Write-Output "All installer tests passed ($Pass)."
