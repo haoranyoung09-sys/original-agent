@@ -332,7 +332,11 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("original-dispatch-{n}"));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(dir.join("src")).unwrap();
-        fs::write(dir.join("Cargo.toml"), "[package]\nname=\"demo\"\nversion=\"0.1.0\"\nedition=\"2021\"\n").unwrap();
+        fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname=\"demo\"\nversion=\"0.1.0\"\nedition=\"2021\"\n",
+        )
+        .unwrap();
         fs::write(dir.join("src/lib.rs"), "pub fn x() -> i32 { 1 }\n").unwrap();
         dir
     }
@@ -340,11 +344,7 @@ mod tests {
     #[test]
     fn dispatch_read_and_multi_edit() {
         let root = temp_root();
-        let read = dispatch(
-            "read",
-            &serde_json::json!({"path":"src/lib.rs"}),
-            &root,
-        );
+        let read = dispatch("read", &serde_json::json!({"path":"src/lib.rs"}), &root);
         assert!(read.contains("pub fn x"));
         let edited = dispatch(
             "multi_edit",
@@ -367,11 +367,7 @@ mod tests {
         let msg = dispatch("verify", &serde_json::json!({}), &root);
         assert!(msg.contains("shell disabled"));
         assert!(msg.contains("cargo test"));
-        let bash = dispatch(
-            "bash",
-            &serde_json::json!({"command":"echo hi"}),
-            &root,
-        );
+        let bash = dispatch("bash", &serde_json::json!({"command":"echo hi"}), &root);
         assert!(bash.contains("126") || bash.contains("Shell disabled"));
         let _ = fs::remove_dir_all(&root);
     }

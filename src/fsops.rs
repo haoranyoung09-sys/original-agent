@@ -46,8 +46,7 @@ pub fn read_text(root: &Path, path: &str, range: ReadRange) -> Result<String> {
 pub fn write_text(root: &Path, path: &str, content: &str) -> Result<String> {
     let resolved = resolve_in_workspace(root, path)?;
     if let Some(parent) = resolved.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("mkdir {}", parent.display()))?;
+        fs::create_dir_all(parent).with_context(|| format!("mkdir {}", parent.display()))?;
     }
     fs::write(&resolved, content)
         .with_context(|| format!("write failed {}", resolved.display()))?;
@@ -75,7 +74,8 @@ pub fn edit_once(root: &Path, path: &str, old_str: &str, new_str: &str) -> Resul
         );
     }
     let updated = content.replacen(old_str, new_str, 1);
-    fs::write(&resolved, updated).with_context(|| format!("edit write failed {}", resolved.display()))?;
+    fs::write(&resolved, updated)
+        .with_context(|| format!("edit write failed {}", resolved.display()))?;
     Ok(format!(
         "edited {} (1 replacement)",
         display_rel(root, &resolved)
@@ -392,21 +392,48 @@ fn should_skip_name(name: &str) -> bool {
     ) || (name.starts_with('.')
         && !matches!(
             name,
-            ".env.example"
-                | ".gitignore"
-                | ".editorconfig"
-                | ".gitattributes"
-                | ".github"
+            ".env.example" | ".gitignore" | ".editorconfig" | ".gitattributes" | ".github"
         ))
 }
 
 fn looks_like_text_file(path: &Path) -> bool {
-    match path.extension().and_then(|e| e.to_str()).map(|s| s.to_ascii_lowercase()) {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_ascii_lowercase())
+    {
         Some(ext) => matches!(
             ext.as_str(),
-            "rs" | "toml" | "md" | "txt" | "json" | "yml" | "yaml" | "js" | "ts" | "tsx" | "jsx"
-                | "py" | "go" | "java" | "kt" | "c" | "h" | "cpp" | "hpp" | "cs" | "rb" | "php"
-                | "sh" | "ps1" | "css" | "html" | "svg" | "sql" | "ini" | "cfg" | "lock"
+            "rs" | "toml"
+                | "md"
+                | "txt"
+                | "json"
+                | "yml"
+                | "yaml"
+                | "js"
+                | "ts"
+                | "tsx"
+                | "jsx"
+                | "py"
+                | "go"
+                | "java"
+                | "kt"
+                | "c"
+                | "h"
+                | "cpp"
+                | "hpp"
+                | "cs"
+                | "rb"
+                | "php"
+                | "sh"
+                | "ps1"
+                | "css"
+                | "html"
+                | "svg"
+                | "sql"
+                | "ini"
+                | "cfg"
+                | "lock"
         ),
         None => matches!(
             path.file_name().and_then(|n| n.to_str()),
@@ -520,7 +547,15 @@ mod tests {
     fn read_write_edit_roundtrip() {
         let root = temp_root("rwe");
         write_text(&root, "src/a.rs", "fn main() {\n    println!(\"hi\");\n}\n").unwrap();
-        let shown = read_text(&root, "src/a.rs", ReadRange { offset: Some(1), limit: Some(2) }).unwrap();
+        let shown = read_text(
+            &root,
+            "src/a.rs",
+            ReadRange {
+                offset: Some(1),
+                limit: Some(2),
+            },
+        )
+        .unwrap();
         assert!(shown.contains("1|fn main()"));
         edit_once(&root, "src/a.rs", "println!(\"hi\");", "println!(\"hey\");").unwrap();
         let body = fs::read_to_string(root.join("src/a.rs")).unwrap();

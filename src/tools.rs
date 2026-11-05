@@ -49,7 +49,10 @@ fn downcast_tool_result(intermediate: Box<dyn IntermediateToolResult>) -> ToolRe
     }
 }
 
-fn map_result(tool_use_id: &str, result: anyhow::Result<String>) -> Box<dyn IntermediateToolResult> {
+fn map_result(
+    tool_use_id: &str,
+    result: anyhow::Result<String>,
+) -> Box<dyn IntermediateToolResult> {
     match result {
         Ok(text) => ok_result(tool_use_id, text),
         Err(e) => err_result(tool_use_id, e.to_string()),
@@ -608,11 +611,10 @@ impl<A: Agent> ToolCallback<A> for VerifyTool {
         let timeout = input.timeout_secs.unwrap_or(180).clamp(1, 600);
         let root = self.ctx.root.as_path().to_path_buf();
         let command = input.command.clone();
-        let body = tokio::task::spawn_blocking(move || {
-            run_verify(&root, command.as_deref(), timeout)
-        })
-        .await
-        .unwrap_or_else(|e| format!("verify join error: {e}"));
+        let body =
+            tokio::task::spawn_blocking(move || run_verify(&root, command.as_deref(), timeout))
+                .await
+                .unwrap_or_else(|e| format!("verify join error: {e}"));
         // Informational block / no-command messages are ok; non-zero exit is an error.
         if body.contains("exit_code:") && !body.contains("exit_code: 0") {
             err_result(&tool_use.id, body)

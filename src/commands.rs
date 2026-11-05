@@ -8,7 +8,9 @@ pub enum SlashAction {
     Status,
     Login,
     /// `None` means show current model; `Some(name)` switches.
-    Model { name: Option<String> },
+    Model {
+        name: Option<String>,
+    },
     Unknown(String),
     /// Not a slash command — treat as chat/user text.
     NotSlash,
@@ -76,9 +78,6 @@ mod tests {
     fn non_slash_and_unknown() {
         assert_eq!(parse_slash("hello"), SlashAction::NotSlash);
         assert_eq!(parse_slash(""), SlashAction::NotSlash);
-        assert_eq!(
-            parse_slash("/nope"),
-            SlashAction::Unknown("/nope".into())
-        );
+        assert_eq!(parse_slash("/nope"), SlashAction::Unknown("/nope".into()));
     }
 }

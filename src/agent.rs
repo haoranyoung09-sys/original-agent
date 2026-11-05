@@ -170,13 +170,8 @@ mod tests {
 
     #[test]
     fn system_prompt_mentions_vibe_tools() {
-        let agent = OriginalAgent::new(
-            std::env::temp_dir(),
-            "m".into(),
-            EffortLevel::Medium,
-            1024,
-        )
-        .unwrap();
+        let agent = OriginalAgent::new(std::env::temp_dir(), "m".into(), EffortLevel::Medium, 1024)
+            .unwrap();
         let prompt = agent.system_prompt_text();
         assert!(prompt.contains("multi_edit"));
         assert!(prompt.contains("project_overview"));

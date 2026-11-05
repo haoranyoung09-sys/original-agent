@@ -655,7 +655,8 @@ async fn main() -> Result<()> {
                         continue;
                     }
                     commands::SlashAction::Login => {
-                        if let Err(e) = do_login(&mut rl, &mut cfg, &session, &agent, &mut backend) {
+                        if let Err(e) = do_login(&mut rl, &mut cfg, &session, &agent, &mut backend)
+                        {
                             eprintln!("登录失败: {e:#}");
                         } else {
                             // Reset chat histories when switching backends.
