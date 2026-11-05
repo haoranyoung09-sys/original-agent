@@ -9,3 +9,8 @@
 ## PowerShell 空值错误修复
 
 用户截图出现 InvokeMethodOnNull，但未包含内部行号。当前机器的 RuntimeInformation 架构读取正常，无法确认与用户环境相同的根因。改用 Windows 架构环境变量，校验下载的 checksum 非空后再 Trim，并增加 TLS 1.2 与下载失败来源/行号信息。新增 scripts/test-installer.ps1，使用模拟下载测试空校验文件及无效版本，Windows PowerShell 5.1 执行两项通过。测试不安装程序、不修改 PATH。远程脚本获取在本环境发生 TLS 认证失败，未关闭证书校验，未验证实际 Release 下载。
+
+## 下载连接中断
+
+截图定位到 Invoke-WebRequest 下载阶段。本机 curl 访问同一 Release 资源连接超时（exit 28），未确认远程附件存在性。增加 30 秒 PowerShell 下载超时、curl.exe 后备下载及两次重试，保留 HTTPS 证书验证；增加 404 与网络/TLS 错误说明。Windows PowerShell 5.1 模拟测试三项通过，包括连接失败后备超时；真实下载仍受网络阻塞。
+
