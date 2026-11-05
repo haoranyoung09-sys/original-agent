@@ -17,10 +17,6 @@ use crate::types::{
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 pub enum ToolUnionParam {
-    /// A custom tool with a defined schema
-    #[serde(rename = "custom")]
-    CustomTool(ToolParam),
-
     /// A bash tool for executing shell commands (version 20241022)
     #[serde(rename = "bash_20241022")]
     Bash20241022(ToolBash20241022),
@@ -44,6 +40,10 @@ pub enum ToolUnionParam {
     /// A web search tool for retrieving information from the internet
     #[serde(rename = "web_search_20250305")]
     WebSearch20250305(WebSearchTool20250305),
+    /// Custom tools use the schema object directly, without a server-tool discriminator.
+    #[serde(untagged)]
+    CustomTool(ToolParam),
+
 }
 
 impl ToolUnionParam {
@@ -142,7 +142,6 @@ mod tests {
                     "type": "ephemeral"
                 },
                 "description": "Search for information",
-                "type": "custom"
             })
         );
     }

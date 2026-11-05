@@ -270,6 +270,22 @@ pub fn input_footer(model: &str, effort: crate::session::EffortLevel, width: usi
         "─".repeat(width.saturating_sub(left + label_width))
     )
 }
+/// Prefer the visible Windows console viewport over a cached editor width.
+pub fn terminal_width(fallback: usize) -> usize {
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::System::Console::*;
+        let mut info = std::mem::zeroed();
+        if GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &mut info) != 0 {
+            let width = info.srWindow.Right - info.srWindow.Left + 1;
+            if width > 0 {
+                return width as usize;
+            }
+        }
+    }
+    fallback.max(4)
+}
+
 #[cfg(test)]
 mod input_tests {
     use super::*;

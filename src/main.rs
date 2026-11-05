@@ -615,11 +615,8 @@ async fn main() -> Result<()> {
     }
 
     loop {
-        let width = rl
-            .dimensions()
-            .map(|(cols, _)| cols.saturating_sub(1))
-            .unwrap_or(60)
-            .max(4);
+        let width = rl.dimensions().map(|(cols, _)| cols).unwrap_or(60).max(4);
+        let width = ui::terminal_width(width);
         rl.helper_mut().unwrap().input_frame = true;
         rl.helper_mut().unwrap().frame_width = width;
         let prompt = ui::input_prompt(width);
@@ -744,4 +741,19 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod wire_tests {
+    #[test]
+    fn custom_tools_omit_server_type() {
+        let tool = claudius::ToolUnionParam::new_custom_tool(
+            "read".into(),
+            serde_json::json!({"type":"object"}),
+        );
+        let value = serde_json::to_value(&tool).unwrap();
+        assert!(value.get("type").is_none());
+        assert_eq!(value["name"], "read");
+        assert_eq!(value["input_schema"]["type"], "object");
+    }
 }
