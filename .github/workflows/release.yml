@@ -46,11 +46,14 @@ jobs:
         run: |
           import hashlib, os, pathlib, shutil
           out = pathlib.Path('dist')
-          out.mkdir()
+          # Idempotent: checkout may already have dist/ (e.g. local-release fixtures).
+          if out.exists():
+              shutil.rmtree(out)
+          out.mkdir(parents=True, exist_ok=True)
           name = os.environ['ASSET']
           shutil.copyfile('target/release/' + os.environ['BINARY'], out / name)
           digest = hashlib.sha256((out / name).read_bytes()).hexdigest()
-          (out / (name + '.sha256')).write_text(digest + '  ' + name + '\n')
+          (out / (name + '.sha256')).write_text(digest + '  ' + name + '\n', encoding='utf-8')
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset }}
