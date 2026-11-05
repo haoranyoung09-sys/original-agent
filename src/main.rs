@@ -252,7 +252,6 @@ impl ConditionalEventHandler for CycleEffortHandler {
             cfg.effort = new_effort;
             let _ = cfg.save();
         }
-        println!("\n思考强度 → {} ({})", new_effort, new_effort.label());
         Some(Cmd::Repaint)
     }
 }
@@ -260,25 +259,54 @@ impl ConditionalEventHandler for CycleEffortHandler {
 #[derive(Clone, Default)]
 struct ReplHelper {
     session: Option<SharedSession>,
+    input_frame: bool,
 }
 
 impl rustyline::Helper for ReplHelper {}
 impl rustyline::completion::Completer for ReplHelper {
     type Candidate = rustyline::completion::Pair;
 }
+struct FrameHint(String);
+impl rustyline::hint::Hint for FrameHint {
+    fn display(&self) -> &str {
+        &self.0
+    }
+    fn completion(&self) -> Option<&str> {
+        None
+    }
+}
 impl rustyline::hint::Hinter for ReplHelper {
-    type Hint = String;
+    type Hint = FrameHint;
+    fn hint(&self, _line: &str, _pos: usize, _ctx: &rustyline::Context<'_>) -> Option<FrameHint> {
+        if !self.input_frame {
+            return None;
+        }
+        let s = self.session.as_ref()?.lock().ok()?;
+        Some(FrameHint(format!(
+            "\n{}",
+            ui::input_footer(&s.model, s.effort)
+        )))
+    }
 }
 impl rustyline::highlight::Highlighter for ReplHelper {
+    fn highlight_hint<'h>(&self, hint: &'h str) -> std::borrow::Cow<'h, str> {
+        if let Some(session) = &self.session {
+            if let Ok(s) = session.lock() {
+                return std::borrow::Cow::Owned(ui::color_input(hint, s.effort));
+            }
+        }
+        std::borrow::Cow::Borrowed(hint)
+    }
+
     fn highlight_prompt<'b, 's: 'b, 'p: 'b>(
         &'s self,
         prompt: &'p str,
         _default: bool,
     ) -> std::borrow::Cow<'b, str> {
-        if prompt == "│ ❯ " {
+        if self.input_frame {
             if let Some(session) = &self.session {
                 if let Ok(s) = session.lock() {
-                    return std::borrow::Cow::Owned(ui::effort_prompt(s.effort));
+                    return std::borrow::Cow::Owned(ui::color_input(prompt, s.effort));
                 }
             }
         }
@@ -569,6 +597,7 @@ async fn main() -> Result<()> {
         .context("初始化 REPL 失败")?;
     rl.set_helper(Some(ReplHelper {
         session: Some(session.clone()),
+        input_frame: false,
     }));
     rl.bind_sequence(
         KeyEvent(KeyCode::BackTab, Modifiers::NONE),
@@ -584,9 +613,11 @@ async fn main() -> Result<()> {
     }
 
     loop {
-        ui::print_input_border(session.lock().unwrap().effort);
+        rl.helper_mut().unwrap().input_frame = true;
         let prompt = ui::input_prompt();
-        match rl.readline(&prompt) {
+        let input = rl.readline(&prompt);
+        rl.helper_mut().unwrap().input_frame = false;
+        match input {
             Ok(line) => {
                 let line = line.trim().to_string();
                 if line.is_empty() {

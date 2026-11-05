@@ -43,14 +43,6 @@ impl EffortLevel {
             Self::High => Effort::Max,
         }
     }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Low => "低",
-            Self::Medium => "中",
-            Self::High => "高",
-        }
-    }
 }
 
 impl fmt::Display for EffortLevel {

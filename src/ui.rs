@@ -213,7 +213,7 @@ pub fn print_status_full(session: &SessionState, cfg: &Config, cwd: &std::path::
 
 /// Pi-like prompt — no frame.
 pub fn input_prompt() -> String {
-    "│ ❯ ".into()
+    format!("{}\n❯ ", "─".repeat(60))
 }
 
 pub fn print_help_panel() {
@@ -244,15 +244,25 @@ fn effort_color(effort: crate::session::EffortLevel) -> &'static str {
         crate::session::EffortLevel::High => "35",
     }
 }
-pub fn effort_prompt(effort: crate::session::EffortLevel) -> String {
-    c(effort_color(effort), "│ ❯ ")
+pub fn color_input(text: &str, effort: crate::session::EffortLevel) -> String {
+    c(effort_color(effort), text)
 }
-pub fn print_input_border(effort: crate::session::EffortLevel) {
-    println!(
-        "{}",
-        c(
-            effort_color(effort),
-            &format!("╭── {} ── Shift+Tab ───────────", effort.as_str())
-        )
-    );
+pub fn input_footer(model: &str, effort: crate::session::EffortLevel) -> String {
+    let name: String = if model.is_empty() { "未登录" } else { model }
+        .chars()
+        .filter(|ch| !ch.is_control())
+        .take(36)
+        .collect();
+    format!("{} {} · {} ────", "─".repeat(12), name, effort.as_str())
+}
+#[cfg(test)]
+mod input_tests {
+    use super::*;
+    #[test]
+    fn frame_has_continuous_rules_and_center_dot() {
+        assert_eq!(input_prompt(), format!("{}\n❯ ", "─".repeat(60)));
+        let footer = input_footer("test-model", crate::session::EffortLevel::High);
+        assert!(footer.contains("test-model · high"));
+        assert!(!footer.contains('\n'));
+    }
 }

@@ -54,7 +54,7 @@ original --allow-shell
 | `/clear` | 清除当前对话；保留累计用量 |
 | `/help`、`/exit` | 帮助、退出 |
 
-输入区采用轻量框线与彩色提示符；设置 `NO_COLOR` 可禁用颜色。OpenAI 兼容后端尚未发送 reasoning_effort，颜色表示 UI 选择，不代表所有模型都支持该参数。
+输入区采用连续上下横线，中间输入，底部显示“模型名 · 思考强度”。Shift+Tab 原位重绘，不追加提示行；设置 `NO_COLOR` 可禁用颜色。OpenAI 兼容后端尚未发送 reasoning_effort，颜色表示 UI 选择，不代表所有模型都支持该参数。
 
 ## 模型默认值
 
