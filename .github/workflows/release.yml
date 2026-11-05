@@ -1,0 +1,67 @@
+name: Release binaries
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            asset: original-windows-x86_64.exe
+            binary: original.exe
+          - os: ubuntu-22.04
+            asset: original-linux-x86_64
+            binary: original
+          - os: macos-15-intel
+            asset: original-macos-x86_64
+            binary: original
+          - os: macos-15
+            asset: original-macos-aarch64
+            binary: original
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check tag matches package version
+        shell: python
+        run: |
+          import os, tomllib
+          with open('Cargo.toml', 'rb') as f:
+              version = tomllib.load(f)['package']['version']
+          assert os.environ['GITHUB_REF_NAME'] == 'v' + version
+      - run: cargo test --locked
+      - run: cargo build --locked --release
+      - name: Package and hash
+        shell: python
+        env:
+          ASSET: ${{ matrix.asset }}
+          BINARY: ${{ matrix.binary }}
+        run: |
+          import hashlib, os, pathlib, shutil
+          out = pathlib.Path('dist')
+          out.mkdir()
+          name = os.environ['ASSET']
+          shutil.copyfile('target/release/' + os.environ['BINARY'], out / name)
+          digest = hashlib.sha256((out / name).read_bytes()).hexdigest()
+          (out / (name + '.sha256')).write_text(digest + '  ' + name + '\n')
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/*
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
