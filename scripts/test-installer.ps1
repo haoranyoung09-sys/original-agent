@@ -1,4 +1,4 @@
-# Offline installer tests for scripts/install.ps1 (Windows PowerShell 5.1+).
+﻿# Offline installer tests for scripts/install.ps1 (Windows PowerShell 5.1+).
 # Uses local fixtures — never hits GitHub, never writes the real user PATH.
 $ErrorActionPreference = 'Stop'
 $Installer = Join-Path $PSScriptRoot 'install.ps1'
@@ -19,7 +19,6 @@ function Assert-ThrowsLike {
     }
 }
 
-# --- rejection paths (mock network) ---
 function Invoke-WebRequest {
     param([switch]$UseBasicParsing, $OutFile, $Uri, $TimeoutSec, [Parameter(ValueFromRemainingArguments = $true)]$Rest)
     Set-Content -LiteralPath $OutFile -Value '' -NoNewline
@@ -47,11 +46,17 @@ Assert-ThrowsLike -Label 'reset retries configured and reset diagnostic preserve
     & $Installer -NoPathUpdate
 }
 
-# Clear network mocks so local fixture path is used (no Invoke-WebRequest needed).
+function curl.exe { $global:LASTEXITCODE = 22 }
+Assert-ThrowsLike -Label 'HTTP 404 maps to missing-release guidance' -Pattern '*Release asset not found*' -Block {
+    & $Installer -NoPathUpdate
+}
+Assert-ThrowsLike -Label 'missing-release guidance mentions local-build fallback' -Pattern '*install-from-local-build*' -Block {
+    & $Installer -NoPathUpdate
+}
+
 Remove-Item Function:Invoke-WebRequest -ErrorAction SilentlyContinue
 Remove-Item Function:curl.exe -ErrorAction SilentlyContinue
 
-# --- local fixture happy path + mismatch ---
 $FixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ("original-install-fixture-" + [Guid]::NewGuid().ToString('N'))
 $BinRoot = Join-Path ([IO.Path]::GetTempPath()) ("original-install-bin-" + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $FixtureRoot | Out-Null
@@ -62,7 +67,6 @@ try {
     $AssetPath = Join-Path $FixtureRoot $Asset
     [IO.File]::WriteAllText($AssetPath, $Payload)
     $Hash = (Get-FileHash -LiteralPath $AssetPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    # Release workflow format: "<hex>  <filename>\n"
     Set-Content -LiteralPath (Join-Path $FixtureRoot "$Asset.sha256") -Value "$Hash  $Asset`n" -NoNewline
 
     $BeforeUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
@@ -79,18 +83,15 @@ try {
     Write-Output 'PASS: local fixture installs with SHA-256 check and skips PATH'
     $Pass++
 
-    # Fixed-version flag accepted with local base (no network).
     & $Installer -Version latest -BaseUrl $FixtureRoot -BinDir $BinRoot -NoPathUpdate
     Write-Output 'PASS: latest + local BaseUrl reinstalls'
     $Pass++
 
-    # Checksum mismatch
     Set-Content -LiteralPath (Join-Path $FixtureRoot "$Asset.sha256") -Value (("0" * 64) + "  $Asset`n") -NoNewline
     Assert-ThrowsLike -Label 'checksum mismatch rejected' -Pattern '*Checksum mismatch*' -Block {
         & $Installer -BaseUrl $FixtureRoot -BinDir $BinRoot -NoPathUpdate
     }
 
-    # Missing local asset
     Remove-Item -LiteralPath $AssetPath -Force
     Assert-ThrowsLike -Label 'missing local asset rejected' -Pattern '*Local release asset not found*' -Block {
         & $Installer -BaseUrl $FixtureRoot -BinDir $BinRoot -NoPathUpdate

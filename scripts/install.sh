@@ -6,7 +6,7 @@
 # Overrides (for tests / mirrors):
 #   ORIGINAL_INSTALL_BASE  — HTTPS base URL, or a local directory with assets
 #   ORIGINAL_INSTALL_BIN   — install dir (default: ~/.local/bin)
-#   ORIGINAL_INSTALL_NO_PATH=1 — skip PATH hint only (Unix never mutates shell rc)
+#   ORIGINAL_INSTALL_NO_PATH=1 — skip PATH hint
 
 set -eu
 version=${1:-latest}
@@ -41,11 +41,26 @@ bin=${ORIGINAL_INSTALL_BIN:-"$HOME/.local/bin"}
 mkdir -p "$bin"
 
 tmp=$(mktemp -d)
-# portable trap cleanup
 trap 'rm -rf -- "$tmp"' EXIT HUP INT TERM
 
+missing_release_help() {
+  url=$1
+  cat >&2 <<MSG
+Release asset not found (HTTP 404): $url
+
+GitHub has no usable prebuilt assets yet (empty Releases or missing $asset).
+The no-Rust curl|sh installer cannot succeed until a Release with attachments is published.
+
+Options:
+  1) Push tag matching Cargo.toml (e.g. v0.3.3), wait for Actions \"Release binaries\", retry
+  2) With a local cargo build: copy target/release/original to ~/.local/bin/original
+  3) With Rust: cargo install --locked --path . --force
+
+See: https://github.com/$repo/releases
+MSG
+}
+
 fetch() {
-  # $1 = source name or URL leaf, $2 = dest path
   src_name=$1
   dest=$2
   if [ -d "$base" ]; then
@@ -55,17 +70,19 @@ fetch() {
     fi
     cp "$base/$src_name" "$dest"
   else
-    curl --fail --location --retry 2 --retry-all-errors --retry-max-time 90 \
+    if ! curl --fail --location --retry 2 --retry-all-errors --retry-max-time 90 \
       --connect-timeout 10 --max-time 120 \
       --proto '=https' --proto-redir '=https' --tlsv1.2 \
-      "$base/$src_name" -o "$dest"
+      "$base/$src_name" -o "$dest"; then
+      missing_release_help "$base/$src_name"
+      exit 1
+    fi
   fi
 }
 
 fetch "$asset" "$tmp/$asset"
 fetch "$asset.sha256" "$tmp/$asset.sha256"
 
-# Normalize checksum file to "HASH  filename" if it only contains the hash.
 checksum_line=$(tr -d '\r' <"$tmp/$asset.sha256" | head -n 1)
 hash=${checksum_line%% *}
 rest=${checksum_line#"$hash"}

@@ -1,10 +1,10 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
   Install prebuilt `original` from GitHub Releases (no Rust required).
 
 .PARAMETER Version
-  `latest` or `vX.Y.Z` (must match a published Release tag).
+  `latest` or `vX.Y.Z` (must match a published Release tag that has assets).
 
 .PARAMETER BaseUrl
   Override download base. HTTPS GitHub URL, or a local directory that already
@@ -28,6 +28,24 @@ param(
 $ErrorActionPreference = "Stop"
 $Repo = "haoranyoung09-sys/original-agent"
 
+function Get-MissingReleaseHelp {
+    param([string]$Url)
+    return @"
+Release asset not found (HTTP 404): $Url
+
+No usable GitHub Release assets yet (empty Releases page or missing original-windows-x86_64.exe).
+The no-Rust irm|iex installer cannot succeed until a Release with attachments is published.
+
+What to do now:
+  1) Publish a Release: push a tag matching Cargo.toml (e.g. v0.3.3), wait for Actions "Release binaries", then retry irm|iex
+  2) If this repo already has target\release\original.exe:
+       powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-from-local-build.ps1
+  3) If you have Rust:
+       cargo install --locked --path . --force
+
+See: https://github.com/$Repo/releases
+"@
+}
 if ($Version -ne "latest" -and $Version -notmatch '^v\d+\.\d+\.\d+$') {
     throw "Version must be latest or vX.Y.Z"
 }
@@ -42,7 +60,6 @@ if (-not $NoPathUpdate -and $env:ORIGINAL_INSTALL_NO_PATH -eq "1") {
     $NoPathUpdate = $true
 }
 
-# Environment variables work on Windows PowerShell 5.1 as well as PowerShell 7.
 $Arch = [string]$env:PROCESSOR_ARCHITEW6432
 if ([string]::IsNullOrWhiteSpace($Arch)) { $Arch = [string]$env:PROCESSOR_ARCHITECTURE }
 if ($Arch -ne "AMD64") { throw "Only Windows x64 releases are available" }
@@ -68,13 +85,25 @@ function Test-LocalReleaseDir {
     return (Test-Path -LiteralPath $Path -PathType Container)
 }
 
+function Get-HttpStatusCode {
+    param($ErrorRecord)
+    $ex = $ErrorRecord.Exception
+    while ($null -ne $ex) {
+        if ($ex.Response -and $ex.Response.StatusCode) {
+            try { return [int]$ex.Response.StatusCode } catch { }
+        }
+        $ex = $ex.InnerException
+    }
+    $msg = [string]$ErrorRecord.Exception.Message
+    if ($msg -match '\(404\)' -or $msg -match '404') { return 404 }
+    return $null
+}
+
 function Get-ReleaseFile {
     param([string]$Url, [string]$OutFile)
 
-    # Local fixture / offline mirror: BaseUrl is a directory.
     if (Test-LocalReleaseDir $BaseUrl) {
         $name = Split-Path -Leaf $OutFile
-        # Allow callers to pass either the asset name or 'checksum' temp name.
         if ($name -eq 'checksum') { $name = "$Asset.sha256" }
         $src = Join-Path $BaseUrl $name
         if (-not (Test-Path -LiteralPath $src)) {
@@ -88,18 +117,21 @@ function Get-ReleaseFile {
         Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $OutFile -TimeoutSec 30
         return
     } catch {
-        $Response = $_.Exception.Response
-        if ($null -ne $Response -and [int]$Response.StatusCode -eq 404) {
-            throw "Release asset not found (HTTP 404). Publish a completed Release with binary and checksum first: $Url"
+        $code = Get-HttpStatusCode $_
+        if ($code -eq 404) {
+            throw (Get-MissingReleaseHelp -Url $Url)
         }
         if (-not (Get-Command curl.exe -ErrorAction SilentlyContinue)) {
             throw "GitHub download failed. Check network/proxy access to GitHub. $($_.Exception.Message)"
         }
-        Write-Host 'PowerShell download failed; retrying with curl.exe...'
-        & curl.exe --fail --location --retry 2 --retry-all-errors --retry-max-time 90 --connect-timeout 10 --max-time 120 --proto '=https' --proto-redir '=https' --output $OutFile $Url
+        Write-Host "PowerShell download failed (http=$code); retrying with curl.exe..."
+        & curl.exe --fail --location --retry 2 --retry-all-errors --retry-max-time 90 --connect-timeout 10 --max-time 120 --proto '=https' --proto-redir '=https' --silent --show-error --output $OutFile $Url
         $DownloadExit = $LASTEXITCODE
+        if ($DownloadExit -eq 22) {
+            throw (Get-MissingReleaseHelp -Url $Url)
+        }
         if ($DownloadExit -ne 0) {
-            throw "curl download failed (exit $DownloadExit). Exit 22: HTTP error (check Release assets); 28: timeout; 56: connection reset (check proxy/network); 35/60: TLS/certificate failure. Check network/proxy and https://github.com/$Repo/releases. URL: $Url"
+            throw "curl download failed (exit $DownloadExit). Exit 28: timeout; 56: connection reset (check proxy/network); 35/60: TLS/certificate failure. Check network/proxy and https://github.com/$Repo/releases. URL: $Url"
         }
     }
 }

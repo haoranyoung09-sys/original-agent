@@ -1,10 +1,12 @@
-# original-agent
+﻿# original-agent
 
 Rust 编写的多厂商终端 coding agent，交互参考 [Pi](https://github.com/badlogic/pi-mono)。命令名为 `original`。
 
 ## 安装
 
 无需 Rust 的安装方式（预编译 Release；本机不必安装 Rust 工具链）：
+
+> **当前状态（2026-11-05）**：GitHub Releases 仍为空，没有 `original-windows-x86_64.exe` 等附件，因此 `irm … | iex` / `curl … | sh` 会得到 **HTTP 404**。发布带附件的 Release 之前，请用下面的本机构建安装，或先 `cargo build --release`。
 
 Windows PowerShell（x64）：
 
@@ -19,6 +21,14 @@ irm https://raw.githubusercontent.com/haoranyoung09-sys/original-agent/main/scri
 ```
 
 或先下载脚本再执行：`powershell -File install.ps1 -Version v0.3.3`。
+
+Release 尚未发布时，可用仓库里已构建的二进制（需先 `cargo build --locked --release`）：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-from-local-build.ps1
+```
+
+也可打包成假 Release 目录再走校验安装：`.\scripts\package-local-release.ps1` 后 `.\scripts\install.ps1 -BaseUrl .\dist\local-release`。
 
 Linux x64 / macOS Intel、Apple Silicon：
 
@@ -108,3 +118,4 @@ sh scripts/test-installer.sh                                                   #
 GitHub CI 覆盖 Windows、Linux、macOS（含 installer fixture job）。源码位于 `src/`；vendored SDK 位于 `vendor/claudius/`。本次修改、验证范围及未解决限制归档于 `docs/archive/`（含 [vibe coding 拓展与检验](docs/archive/2026-11-05-vibe-coding.md)）。
 
 [贡献指南](CONTRIBUTING.md) · [安全说明](SECURITY.md) · [MIT 许可证](LICENSE) · [第三方声明](THIRD_PARTY_NOTICES.md)
+
