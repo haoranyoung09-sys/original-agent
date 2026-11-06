@@ -2,7 +2,7 @@
 # Install prebuilt `original` from GitHub Releases (no Rust required).
 # Usage:
 #   curl -fsSL .../install.sh | sh
-#   sh install.sh v0.3.4
+#   sh install.sh v0.3.5
 # Overrides (for tests / mirrors):
 #   ORIGINAL_INSTALL_BASE  — HTTPS base URL, or a local directory with assets
 #   ORIGINAL_INSTALL_BIN   — install dir (default: ~/.local/bin)
@@ -52,7 +52,7 @@ GitHub has no usable prebuilt assets yet (empty Releases or missing $asset).
 The no-Rust curl|sh installer cannot succeed until a Release with attachments is published.
 
 Options:
-  1) Push tag matching Cargo.toml (e.g. v0.3.4), wait for Actions \"Release binaries\", retry
+  1) Push tag matching Cargo.toml (e.g. v0.3.5), wait for Actions \"Release binaries\", retry
   2) With a local cargo build: copy target/release/original to ~/.local/bin/original
   3) With Rust: cargo install --locked --path . --force
 

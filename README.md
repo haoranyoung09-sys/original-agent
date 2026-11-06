@@ -48,11 +48,11 @@ flowchart TD
 | Gemini | 官方 Gemini CLI 交接 | 尚无原生 Gemini API 后端 |
 | 自定义服务商 | 自定义 URL、模型、API 风格 | 需支持对应的工具调用 schema；“兼容”不保证所有扩展参数通用 |
 
-模型价格和上下文是代码内的可修改预设，不会实时更新。切换模型后需重新核对；官方 CLI 模式不按本项目的 API 单价计算订阅费用。
+模型价格和上下文来自代码内建对照表（公开资料快照），不会实时抓取官网。`/login` 与 `/model` 会按模型名自动填写；未知模型保留当前值并提示。官方 CLI 模式不按本项目的 API 单价计算订阅费用。
 
 ## 登录方式速查
 
-**API 模式**：运行 `original`，输入 `/login`，选择服务商并设置 API Key、URL、模型及价格。配置位于 `~/.original-agent/config.json`，密钥是本地明文。环境变量可覆盖密钥，推荐只设置当前服务商对应变量，或使用明确的 `ORIGINAL_API_KEY`；不要同时遗留多个服务商的 Key。
+**API 模式**：运行 `original`，输入 `/login`，选择服务商并设置 API Key、URL、模型；价格与上下文按模型自动填写。配置位于 `~/.original-agent/config.json`，密钥是本地明文。环境变量可覆盖密钥，推荐只设置当前服务商对应变量，或使用明确的 `ORIGINAL_API_KEY`；不要同时遗留多个服务商的 Key。
 
 **官方客户端模式**：先安装对应 CLI 并加入 PATH，然后执行 `original --subscription codex`、`original --subscription claude` 或 `original --subscription gemini`。登录界面、鉴权、工具权限和额度由官方客户端负责。这只是交互式交接，**不是在 original 内直接使用订阅模型**；已有 API Key 登录不会自动变成订阅计费。本项目不获取浏览器 Cookie，也不复制官方 CLI 的认证缓存。
 
@@ -70,7 +70,7 @@ iex (irm https://raw.githubusercontent.com/haoranyoung09-sys/original-agent/main
 固定版本：
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/haoranyoung09-sys/original-agent/main/scripts/install.ps1))) -Version v0.3.4
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/haoranyoung09-sys/original-agent/main/scripts/install.ps1))) -Version v0.3.5
 ```
 
 不经过 `iex` 的备用（先下载再 `-File`）：
@@ -93,12 +93,12 @@ Linux x64 / macOS Intel、Apple Silicon：
 ```sh
 curl -fsSL https://raw.githubusercontent.com/haoranyoung09-sys/original-agent/main/scripts/install.sh | sh
 # 固定版本：下载脚本后
-sh install.sh v0.3.4
+sh install.sh v0.3.5
 ```
 
 脚本下载 GitHub Release 附件并校验 SHA-256。Windows 安装到 `%USERPROFILE%\.original-agent\bin` 并写入用户 PATH；Unix 安装到 `~/.local/bin`，若尚未在 PATH 会打印 `export` 提示。Linux 构建基于 Ubuntu 22.04（需兼容 glibc）。更新时重复安装命令即可。
 
-维护者发布：推送与 Cargo.toml 版本相同的标签（如 `v0.3.4`）；Release 工作流构建四个平台并附带 `.sha256`。脚本只做完整性校验，不提供独立代码签名。首次 Release 完成前远程安装会失败，不会覆盖已有安装。离线/自测可用 `-BaseUrl` / `ORIGINAL_INSTALL_BASE` 指向本地假 Release 目录，详见 [无 Rust 安装归档](docs/archive/2026-11-05-no-rust-install.md)。
+维护者发布：推送与 Cargo.toml 版本相同的标签（如 `v0.3.5`）；Release 工作流构建四个平台并附带 `.sha256`。脚本只做完整性校验，不提供独立代码签名。首次 Release 完成前远程安装会失败，不会覆盖已有安装。离线/自测可用 `-BaseUrl` / `ORIGINAL_INSTALL_BASE` 指向本地假 Release 目录，详见 [无 Rust 安装归档](docs/archive/2026-11-05-no-rust-install.md)。
 
 ### 从源码安装
 
@@ -125,8 +125,8 @@ original --allow-shell
 
 | 操作 | 用途 |
 | --- | --- |
-| `/login` | 服务商、Key、URL、模型、价格 |
-| `/model <name>` | 切换模型（价格和窗口需重新核对） |
+| `/login` | 服务商、Key、URL、模型（价格/上下文自动） |
+| `/model <name>` | 切换模型（自动套用公开定价与上下文） |
 | `/status` | 模型、用量、费用估算 |
 | Shift+Tab | low 青色 → medium 黄色 → high 紫色 |
 | `/clear` | 清除当前对话；保留累计用量 |
@@ -151,7 +151,7 @@ original --allow-shell
 
 ## 模型默认值
 
-价格单位为 USD / 1M tokens，核对日期 2026-11-05。实际账单以服务商为准。
+价格单位为 USD / 1M tokens，核对日期 2026-11-06。实际账单以服务商为准。
 
 | 模型 | 上下文 | 输入 | 输出 |
 | --- | ---: | ---: | ---: |
@@ -159,7 +159,7 @@ original --allow-shell
 | GPT-4.1 | 1,047,576 | 2 | 8 |
 | DeepSeek Flash | 1,000,000 | 0.30 | 1.20 |
 
-DeepSeek 使用峰值费率估算，非高峰费率减半。缓存折扣等可能未完整计入。自定义模型必须自行设置价格和上下文。[官方资料与审查归档](docs/archive/2026-11-05-review.md)。
+DeepSeek 使用峰值费率估算，非高峰费率减半。缓存折扣等可能未完整计入。自定义/未知模型不会卡住登录，但费用估算可能为空或不准；可在对照表中补充。[官方资料与审查归档](docs/archive/2026-11-05-review.md)。
 
 ## 开发
 

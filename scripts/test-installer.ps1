@@ -71,7 +71,7 @@ try {
 
     $BeforeUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 
-    & $Installer -Version v0.3.4 -BaseUrl $FixtureRoot -BinDir $BinRoot -NoPathUpdate
+    & $Installer -Version v0.3.5 -BaseUrl $FixtureRoot -BinDir $BinRoot -NoPathUpdate
     $Dest = Join-Path $BinRoot 'original.exe'
     if (-not (Test-Path -LiteralPath $Dest)) { throw 'FAIL happy path: original.exe missing' }
     $Installed = [IO.File]::ReadAllText($Dest)

@@ -25,7 +25,7 @@ These are implemented presets and integration paths, not a claim that every mode
 | Gemini | Official Gemini CLI handoff | No native Gemini API backend |
 | Custom providers | Configurable URL, model and API style | Tool schemas and optional parameters must be compatible |
 
-Prices and context windows are editable presets, not live provider data. Switching models requires reviewing those settings. Subscription usage is not calculated from API token prices.
+Prices and context windows come from a built-in public catalog (not live provider data). `/login` and `/model` apply them automatically; unknown models keep current values with a note. Subscription usage is not calculated from API token prices.
 
 ## Installation
 
@@ -58,7 +58,7 @@ Exit running `original` processes before updating on Windows. If dependencies ar
 
 ### API mode
 
-Run `original`, then `/login`. Configure provider, API key, base URL, model, context window and token prices. Configuration is stored in `~/.original-agent/config.json`; saved API keys are plaintext. `ORIGINAL_API_KEY` explicitly overrides the saved key. Provider environment variables are also supported, but avoid leaving keys for several providers set simultaneously. Never commit credentials.
+Run `original`, then `/login`. Configure provider, API key, base URL and model; context window and token prices are filled from a built-in public catalog. Configuration is stored in `~/.original-agent/config.json`; saved API keys are plaintext. `ORIGINAL_API_KEY` explicitly overrides the saved key. Provider environment variables are also supported, but avoid leaving keys for several providers set simultaneously. Never commit credentials.
 
 ### Official client handoff
 

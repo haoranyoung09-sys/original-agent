@@ -25,7 +25,7 @@ No usable GitHub Release assets yet (empty Releases page or missing original-win
 The no-Rust remote installer (iex (irm ...)) cannot succeed until a Release with attachments is published.
 
 What to do now:
-  1) Publish a Release: push a tag matching Cargo.toml (e.g. v0.3.4), wait for Actions "Release binaries", then retry: iex (irm <raw-url>)
+  1) Publish a Release: push a tag matching Cargo.toml (e.g. v0.3.5), wait for Actions "Release binaries", then retry: iex (irm <raw-url>)
   2) If this repo already has target\release\original.exe:
        powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-from-local-build.ps1
   3) If you have Rust:

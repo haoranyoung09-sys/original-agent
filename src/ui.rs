@@ -222,7 +222,7 @@ pub fn print_help_panel() {
         c(
             LABEL,
             "\
-/login            选服务商 / Key / URL / 模型 / 单价
+/login            选服务商 / Key / URL / 模型（价格与上下文自动填写）
 /model [name]     查看或切换模型
 /status           状态
 /clear            清空对话（用量保留）

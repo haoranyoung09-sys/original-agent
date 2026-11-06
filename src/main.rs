@@ -15,6 +15,7 @@ mod tool_dispatch;
 mod tool_display;
 mod tools;
 mod ui;
+mod model_catalog;
 mod workspace;
 
 use std::path::PathBuf;
@@ -371,6 +372,45 @@ fn read_line(
     rl.readline(prompt).unwrap_or_default().trim().to_string()
 }
 
+
+/// Fill context window + token prices from the built-in public catalog.
+/// Unknown models keep existing values (e.g. provider preset) and print a note.
+fn apply_model_pricing_and_context(cfg: &mut Config) {
+    match model_catalog::lookup(&cfg.model) {
+        Some(d) => {
+            cfg.context_window = d.context_window;
+            cfg.pricing.input_per_mtok = Some(d.input_per_mtok);
+            cfg.pricing.output_per_mtok = Some(d.output_per_mtok);
+            if let Some(cr) = d.cache_read_per_mtok {
+                cfg.pricing.cache_read_per_mtok = Some(cr);
+            }
+            println!(
+                "已按公开资料自动填写（{}）: 上下文 {} tokens · 输入 ${}/1M · 输出 ${}/1M",
+                d.note, d.context_window, d.input_per_mtok, d.output_per_mtok
+            );
+        }
+        None => {
+            if cfg.context_window == 0 {
+                cfg.context_window = config::DEFAULT_CONTEXT_WINDOW;
+            }
+            let pin = cfg
+                .pricing
+                .input_per_mtok
+                .map(|v| format!("{v}"))
+                .unwrap_or_else(|| "—".into());
+            let pout = cfg
+                .pricing
+                .output_per_mtok
+                .map(|v| format!("{v}"))
+                .unwrap_or_else(|| "—".into());
+            println!(
+                "未找到模型「{}」的公开定价/上下文，保留当前值（上下文 {} · 输入 {} · 输出 {}）；费用估算可能不准。",
+                cfg.model, cfg.context_window, pin, pout
+            );
+        }
+    }
+}
+
 fn do_login(
     rl: &mut Editor<ReplHelper, rustyline::history::DefaultHistory>,
     cfg: &mut Config,
@@ -468,37 +508,7 @@ fn do_login(
         cfg.model = model_default.to_string();
     }
 
-    let cw = read_line(rl, &format!("上下文窗口 tokens [{}]: ", cfg.context_window));
-    if !cw.is_empty() {
-        cfg.context_window = cw.parse().context("上下文窗口须为整数")?;
-    }
-
-    let pin = read_line(
-        rl,
-        &format!(
-            "输入单价 USD/1M tokens [{}]（回车跳过）: ",
-            cfg.pricing
-                .input_per_mtok
-                .map(|v| format!("{v}"))
-                .unwrap_or_else(|| "—".into())
-        ),
-    );
-    if !pin.is_empty() {
-        cfg.pricing.input_per_mtok = Some(pin.parse().context("单价须为数字")?);
-    }
-    let pout = read_line(
-        rl,
-        &format!(
-            "输出单价 USD/1M tokens [{}]（回车跳过）: ",
-            cfg.pricing
-                .output_per_mtok
-                .map(|v| format!("{v}"))
-                .unwrap_or_else(|| "—".into())
-        ),
-    );
-    if !pout.is_empty() {
-        cfg.pricing.output_per_mtok = Some(pout.parse().context("单价须为数字")?);
-    }
+    apply_model_pricing_and_context(cfg);
 
     cfg.save().context("保存配置失败")?;
     *backend = Some(build_backend(cfg)?);
@@ -740,8 +750,13 @@ async fn main() -> Result<()> {
                             }
                             Some(rest) => {
                                 cfg.model = rest;
+                                apply_model_pricing_and_context(&mut cfg);
                                 let _ = cfg.save();
-                                session.lock().unwrap().model = cfg.model.clone();
+                                {
+                                    let mut s = session.lock().unwrap();
+                                    s.model = cfg.model.clone();
+                                    s.context_window = cfg.context_window;
+                                }
                                 agent.set_model(cfg.model.clone());
                                 println!("model → {}", cfg.model);
                             }
