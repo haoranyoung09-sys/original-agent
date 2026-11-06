@@ -5,6 +5,10 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+static TIMEOUT_LIMIT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(600);
+pub fn set_timeout_limit(seconds: u64) {
+    TIMEOUT_LIMIT.store(seconds.clamp(1, 600), Ordering::Relaxed);
+}
 static SHELL_ENABLED: AtomicBool = AtomicBool::new(false);
 
 pub fn set_shell_enabled(enabled: bool) {
@@ -17,6 +21,19 @@ pub fn shell_enabled() -> bool {
 
 /// Run a shell command in `cwd` with a soft timeout.
 pub fn execute_shell(command: &str, cwd: &PathBuf, timeout_secs: u64) -> (i32, String, String) {
+    let timeout = timeout_secs
+        .clamp(1, 600)
+        .min(TIMEOUT_LIMIT.load(Ordering::Relaxed));
+    let start = std::time::Instant::now();
+    let result = execute_inner(command, cwd, timeout);
+    crate::tool_display::status(
+        &format!("command (limit {timeout}s, exit {})", result.0),
+        result.0 == 0,
+        start.elapsed().as_secs_f64(),
+    );
+    result
+}
+fn execute_inner(command: &str, cwd: &PathBuf, timeout_secs: u64) -> (i32, String, String) {
     if !SHELL_ENABLED.load(Ordering::Relaxed) {
         return (
             126,

@@ -179,6 +179,11 @@ pub async fn take_turn(
             .context("响应缺少 choices")?;
         let message = choice.get("message").cloned().context("响应缺少 message")?;
 
+        if crate::tool_display::thinking_enabled() {
+            if let Some(t) = message.get("reasoning_content").and_then(Value::as_str) {
+                println!("[provider thinking]\n{t}");
+            }
+        }
         let content = message.get("content").cloned();
         let tool_calls = message.get("tool_calls").cloned();
 
@@ -237,7 +242,7 @@ pub async fn take_turn(
             println!("  → tool {fname}({short})");
             let result = dispatch(&fname, &args, cwd);
             let preview: String = result.chars().take(120).collect();
-            println!("  ✓ {}", preview.replace('\n', " "));
+            println!("  tool result: {}", preview.replace('\n', " "));
             history.push(ChatMessage {
                 role: "tool".into(),
                 content: Some(Value::String(result)),

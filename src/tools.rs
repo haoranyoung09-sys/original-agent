@@ -23,6 +23,7 @@ use crate::tool_dispatch::run_verify;
 pub use crate::shell::set_shell_enabled;
 
 fn ok_result(tool_use_id: &str, text: String) -> Box<dyn IntermediateToolResult> {
+    crate::tool_display::finish(tool_use_id, true);
     Box::new(ControlFlow::Continue(Ok(ToolResultBlock {
         tool_use_id: tool_use_id.to_string(),
         content: Some(ToolResultBlockContent::String(text)),
@@ -32,6 +33,7 @@ fn ok_result(tool_use_id: &str, text: String) -> Box<dyn IntermediateToolResult>
 }
 
 fn err_result(tool_use_id: &str, text: String) -> Box<dyn IntermediateToolResult> {
+    crate::tool_display::finish(tool_use_id, false);
     Box::new(ControlFlow::Continue(Err(ToolResultBlock {
         tool_use_id: tool_use_id.to_string(),
         content: Some(ToolResultBlockContent::String(text)),
@@ -88,6 +90,7 @@ impl<A: Agent> ToolCallback<A> for ReadTool {
         _agent: &A,
         tool_use: &ToolUseBlock,
     ) -> Box<dyn IntermediateToolResult> {
+        crate::tool_display::start(&tool_use.id, &tool_use.name, &tool_use.input);
         let input: ReadInput = match serde_json::from_value(tool_use.input.clone()) {
             Ok(v) => v,
             Err(e) => return err_result(&tool_use.id, format!("invalid read input: {e}")),
@@ -168,6 +171,7 @@ impl<A: Agent> ToolCallback<A> for WriteTool {
         _agent: &A,
         tool_use: &ToolUseBlock,
     ) -> Box<dyn IntermediateToolResult> {
+        crate::tool_display::start(&tool_use.id, &tool_use.name, &tool_use.input);
         let input: WriteInput = match serde_json::from_value(tool_use.input.clone()) {
             Ok(v) => v,
             Err(e) => return err_result(&tool_use.id, format!("invalid write input: {e}")),
@@ -239,6 +243,7 @@ impl<A: Agent> ToolCallback<A> for EditTool {
         _agent: &A,
         tool_use: &ToolUseBlock,
     ) -> Box<dyn IntermediateToolResult> {
+        crate::tool_display::start(&tool_use.id, &tool_use.name, &tool_use.input);
         let input: EditInput = match serde_json::from_value(tool_use.input.clone()) {
             Ok(v) => v,
             Err(e) => return err_result(&tool_use.id, format!("invalid edit input: {e}")),
@@ -318,6 +323,7 @@ impl<A: Agent> ToolCallback<A> for MultiEditTool {
         _agent: &A,
         tool_use: &ToolUseBlock,
     ) -> Box<dyn IntermediateToolResult> {
+        crate::tool_display::start(&tool_use.id, &tool_use.name, &tool_use.input);
         let input: MultiEditInput = match serde_json::from_value(tool_use.input.clone()) {
             Ok(v) => v,
             Err(e) => return err_result(&tool_use.id, format!("invalid multi_edit input: {e}")),
@@ -407,6 +413,7 @@ impl<A: Agent> ToolCallback<A> for GlobTool {
         _agent: &A,
         tool_use: &ToolUseBlock,
     ) -> Box<dyn IntermediateToolResult> {
+        crate::tool_display::start(&tool_use.id, &tool_use.name, &tool_use.input);
         let input: GlobInput = match serde_json::from_value(tool_use.input.clone()) {
             Ok(v) => v,
             Err(e) => return err_result(&tool_use.id, format!("invalid glob input: {e}")),
@@ -476,6 +483,7 @@ impl<A: Agent> ToolCallback<A> for GrepTool {
         _agent: &A,
         tool_use: &ToolUseBlock,
     ) -> Box<dyn IntermediateToolResult> {
+        crate::tool_display::start(&tool_use.id, &tool_use.name, &tool_use.input);
         let input: GrepInput = match serde_json::from_value(tool_use.input.clone()) {
             Ok(v) => v,
             Err(e) => return err_result(&tool_use.id, format!("invalid grep input: {e}")),
@@ -543,6 +551,7 @@ impl<A: Agent> ToolCallback<A> for ProjectOverviewTool {
         _agent: &A,
         tool_use: &ToolUseBlock,
     ) -> Box<dyn IntermediateToolResult> {
+        crate::tool_display::start(&tool_use.id, &tool_use.name, &tool_use.input);
         map_result(&tool_use.id, project_overview(&self.ctx.root))
     }
 
@@ -604,6 +613,7 @@ impl<A: Agent> ToolCallback<A> for VerifyTool {
         _agent: &A,
         tool_use: &ToolUseBlock,
     ) -> Box<dyn IntermediateToolResult> {
+        crate::tool_display::start(&tool_use.id, &tool_use.name, &tool_use.input);
         let input: VerifyInput = match serde_json::from_value(tool_use.input.clone()) {
             Ok(v) => v,
             Err(e) => return err_result(&tool_use.id, format!("invalid verify input: {e}")),
@@ -616,7 +626,7 @@ impl<A: Agent> ToolCallback<A> for VerifyTool {
                 .await
                 .unwrap_or_else(|e| format!("verify join error: {e}"));
         // Informational block / no-command messages are ok; non-zero exit is an error.
-        if body.contains("exit_code:") && !body.contains("exit_code: 0") {
+        if !body.lines().any(|line| line == "exit_code: 0") {
             err_result(&tool_use.id, body)
         } else {
             ok_result(&tool_use.id, body)
@@ -686,6 +696,7 @@ impl<A: Agent> ToolCallback<A> for BashTool {
         _agent: &A,
         tool_use: &ToolUseBlock,
     ) -> Box<dyn IntermediateToolResult> {
+        crate::tool_display::start(&tool_use.id, &tool_use.name, &tool_use.input);
         let input: BashInput = match serde_json::from_value(tool_use.input.clone()) {
             Ok(v) => v,
             Err(e) => return err_result(&tool_use.id, format!("invalid bash input: {e}")),

@@ -208,3 +208,7 @@ Grok 官方订阅接入尚未确认，`--subscription grok` 明确返回不支�
 默认在 `~/.original-agent/sessions/<时间戳-ID>/` 保存 metadata.json 和 events.jsonl。`/sessions` 列出当前项目记录，`/session show <id>` 查看，`/export` 将当前记录导出为同目录 summary.md。`original --no-record` 关闭本次记录。官方 CLI 交接模式不归档。
 
 当前记录用户消息、已完成轮次的对话/工具消息、错误与自动验证输出；不是每个工具完成即落盘，崩溃可能丢失进行中的轮次。登录表单不记录，过滤已知配置密钥和认证行，但任意文本中的其他秘密无法保证识别。记录可能含源代码与命令输出。暂不提供恢复对话、恢复快照、自动保留期限与删除命令，可退出程序后手动删除指定会话目录。关闭归档不等于关闭已有命令行输入历史。
+
+## 执行状态显示
+
+`original --show-thinking --command-timeout 120`：可选显示服务商返回的思考文本（轮次完成后，非流式）；命令超时上限 1–600 秒，不影响 HTTP 超时。Anthropic 工具显示指令/路径、耗时和成功/失败背景色；两种后端的 Shell 命令按退出码着色。OpenAI 普通文件工具仍是中性结果文字。NO_COLOR 或非终端输出禁用颜色。未进行付费 API 测试。

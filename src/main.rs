@@ -12,6 +12,7 @@ mod session;
 mod shell;
 mod subscription;
 mod tool_dispatch;
+mod tool_display;
 mod tools;
 mod ui;
 mod workspace;
@@ -63,6 +64,11 @@ struct Cli {
     /// Do not write local session archives.
     #[arg(long)]
     no_record: bool,
+    /// Maximum duration of each shell/verification command, in seconds.
+    #[arg(long, default_value_t = 600, value_parser = clap::value_parser!(u64).range(1..=600))]
+    command_timeout: u64,
+    #[arg(long)]
+    show_thinking: bool,
     #[arg(short = 'p', long = "print")]
     print: Option<String>,
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -109,6 +115,9 @@ fn extract_assistant_text(content: &MessageParamContent) -> String {
             for block in blocks {
                 match block {
                     ContentBlock::Text(t) => parts.push(t.text.clone()),
+                    ContentBlock::Thinking(t) if tool_display::thinking_enabled() => {
+                        parts.push(format!("[provider thinking]\n{}", t.thinking))
+                    }
                     ContentBlock::ToolUse(tu) => {
                         let input = serde_json::to_string(&tu.input).unwrap_or_default();
                         let short = if input.len() > 200 {
@@ -518,6 +527,8 @@ fn do_login(
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+    shell::set_timeout_limit(cli.command_timeout);
+    tool_display::SHOW_THINKING.store(cli.show_thinking, std::sync::atomic::Ordering::Relaxed);
     tools::set_shell_enabled(cli.allow_shell);
 
     let cwd = match cli.cwd {
