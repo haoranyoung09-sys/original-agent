@@ -1,6 +1,7 @@
 //! original — multi-provider Pi-like terminal coding agent (claudius + OpenAI-compatible).
 
 mod agent;
+mod subscription;
 mod commands;
 mod config;
 mod fsops;
@@ -48,6 +49,9 @@ enum Backend {
 struct Cli {
     #[arg(long)]
     cwd: Option<PathBuf>,
+    /// Open an official CLI; authentication and billing remain with that client.
+    #[arg(long, value_enum, conflicts_with_all = ["print", "message", "allow_shell", "max_tokens", "budget_tokens"])]
+    subscription: Option<subscription::Client>,
     /// Allow model-generated shell commands with your full user permissions.
     #[arg(long)]
     allow_shell: bool,
@@ -489,7 +493,6 @@ fn do_login(
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    load_dotenv();
     let cli = Cli::parse();
     tools::set_shell_enabled(cli.allow_shell);
 
@@ -505,6 +508,10 @@ async fn main() -> Result<()> {
         None => std::env::current_dir().context("无法获取当前工作目录")?,
     };
 
+    if let Some(client) = cli.subscription {
+        return subscription::launch(client, &cwd);
+    }
+    load_dotenv();
     let oneshot = if let Some(p) = cli.print {
         Some(p)
     } else if !cli.message.is_empty() {

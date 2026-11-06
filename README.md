@@ -124,3 +124,20 @@ GitHub CI 覆盖 Windows、Linux、macOS（含 installer fixture job）。源码
 
 [贡献指南](CONTRIBUTING.md) · [安全说明](SECURITY.md) · [MIT 许可证](LICENSE) · [第三方声明](THIRD_PARTY_NOTICES.md)
 
+
+## 官方客户端订阅入口（第一阶段）
+
+先安装官方 Codex CLI、Claude Code 或 Gemini CLI，并确保它们位于 PATH：
+
+```sh
+original --subscription codex
+original --subscription claude
+original --subscription gemini
+original --subscription codex --cwd /path/to/project
+```
+
+这些命令将终端交给官方客户端；通过其官方登录界面选择账号。当前不是 original 输入框内的统一订阅后端，不迁移对话、不复制 OAuth 凭据，也不读取浏览器 Cookie。权限与工具执行由官方客户端控制，original 的 --allow-shell 不适用于这个模式。现有客户端若已使用 API Key 登录，启动不会自动切成订阅计费；请在客户端确认登录方式与实际额度。此模式不加载 original 的 .env，但继承当前终端环境。
+
+Grok 官方订阅接入尚未确认，`--subscription grok` 明确返回不支持；官方 API 可以通过自定义 OpenAI 兼容配置接入 https://api.x.ai/v1，模型与计费以 xAI 控制台为准。
+
+来源：https://learn.chatgpt.com/docs/auth?surface=cli 、https://code.claude.com/docs/en/headless 、https://geminicli.com/docs/get-started/authentication/ 、https://docs.x.ai/developers/quickstart 。
