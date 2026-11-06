@@ -6,6 +6,7 @@ mod changes;
 mod commands;
 mod config;
 mod fsops;
+mod model_catalog;
 mod openai_client;
 mod provider;
 mod session;
@@ -15,7 +16,6 @@ mod tool_dispatch;
 mod tool_display;
 mod tools;
 mod ui;
-mod model_catalog;
 mod workspace;
 
 use std::path::PathBuf;
@@ -371,7 +371,6 @@ fn read_line(
 ) -> String {
     rl.readline(prompt).unwrap_or_default().trim().to_string()
 }
-
 
 /// Fill context window + token prices from the built-in public catalog.
 /// Unknown models keep existing values (e.g. provider preset) and print a note.
