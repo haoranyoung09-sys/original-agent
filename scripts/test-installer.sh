@@ -46,7 +46,7 @@ fi
 ORIGINAL_INSTALL_BASE=$fixture \
 ORIGINAL_INSTALL_BIN=$bindir \
 ORIGINAL_INSTALL_NO_PATH=1 \
-  sh "$installer" v0.3.3
+  sh "$installer" v0.3.4
 
 test -x "$bindir/original"
 installed=$(cat "$bindir/original")

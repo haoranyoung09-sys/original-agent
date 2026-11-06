@@ -1,4 +1,4 @@
-﻿# Offline installer tests for scripts/install.ps1 (Windows PowerShell 5.1+).
+# Offline installer tests for scripts/install.ps1 (Windows PowerShell 5.1+).
 # Uses local fixtures — never hits GitHub, never writes the real user PATH.
 $ErrorActionPreference = 'Stop'
 $Installer = Join-Path $PSScriptRoot 'install.ps1'
@@ -71,7 +71,7 @@ try {
 
     $BeforeUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 
-    & $Installer -Version v0.3.3 -BaseUrl $FixtureRoot -BinDir $BinRoot -NoPathUpdate
+    & $Installer -Version v0.3.4 -BaseUrl $FixtureRoot -BinDir $BinRoot -NoPathUpdate
     $Dest = Join-Path $BinRoot 'original.exe'
     if (-not (Test-Path -LiteralPath $Dest)) { throw 'FAIL happy path: original.exe missing' }
     $Installed = [IO.File]::ReadAllText($Dest)
