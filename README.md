@@ -1,12 +1,65 @@
 # original-agent
 
+**简体中文** | [English](README.en.md)
+
 Rust 编写的多厂商终端 coding agent，交互参考 [Pi](https://github.com/badlogic/pi-mono)。命令名为 `original`。
+
+
+## 技术架构与 SDK
+
+本项目是 Rust 2021 编写的独立终端应用，不是 Pi 的 Rust 官方版本，也不隶属于 Anthropic、OpenAI 或 Google。
+
+- **运行时**：Tokio 异步运行时；Clap 解析启动参数；Rustyline 管理终端输入和快捷键。
+- **Anthropic 协议**：使用社区 Rust SDK [claudius](https://github.com/rescrv/claudius)，本仓库内置版本为 0.33.0，位于 [vendor/claudius](vendor/claudius)。这是社区 SDK，**不是 Anthropic 官方 Rust SDK**。
+- **SDK 本地修改**：保留 Windows 编译适配，自定义工具按不含服务端 `type` 标签的 schema 序列化，以兼容已遇到的 DeepSeek 请求问题。
+- **OpenAI 兼容协议**：由 reqwest + Serde 实现 Chat Completions 与工具循环，不依赖官方 OpenAI Rust SDK；目前不提供 Responses API 后端。
+- **共享编码工具**：文件读写、唯一文本编辑、批量编辑、glob、字面 grep、项目概览和验证；并提供当前进程快照、回退及本地会话归档。
+
+```mermaid
+flowchart TD
+    A[original CLI / REPL] --> B[配置与会话]
+    B --> C[Anthropic: claudius 社区 SDK]
+    B --> D[OpenAI compatible: reqwest]
+    C --> E[共享文件与验证工具]
+    D --> E
+    E --> F[工作区文件]
+    A --> G[官方 CLI 交接]
+    G --> H[Codex / Claude Code / Gemini CLI]
+```
+
+| 模块 | 职责 |
+| --- | --- |
+| `src/main.rs`、`src/ui.rs` | 启动、输入、显示与交互验证循环 |
+| `src/agent.rs`、`src/openai_client.rs` | 两种协议的模型调用 |
+| `src/tools.rs`、`src/tool_dispatch.rs`、`src/fsops.rs` | 统一编码工具与文件操作 |
+| `src/changes.rs`、`src/archive.rs` | 进程内改动记录与磁盘会话归档 |
+| `src/subscription.rs` | 交接给已安装的官方客户端 |
+
+## 模型兼容范围
+
+下表描述当前代码的预设和接入路径，不代表所有模型均经过真实账号端到端测试。
+
+| 服务 | 内置预设 / 接入方式 | 说明 |
+| --- | --- | --- |
+| Anthropic Claude | `claude-sonnet-4-20250514`，Messages API | `/login` 选择 Anthropic；其他模型可配置，但思考与工具参数须兼容 |
+| OpenAI | `gpt-4.1`，Chat Completions | `/login` 选择 OpenAI；并非所有 OpenAI 模型均支持此协议 |
+| DeepSeek | `deepseek-flash`，OpenAI / Anthropic 兼容端点 | 可自行填写其他可用模型，如 `deepseek-v4-pro`；价格与窗口需核对 |
+| Grok / xAI | 自定义 OpenAI 兼容，`https://api.x.ai/v1` | 使用官方 API Key 和账号可用模型；没有内置订阅 OAuth |
+| Gemini | 官方 Gemini CLI 交接 | 尚无原生 Gemini API 后端 |
+| 自定义服务商 | 自定义 URL、模型、API 风格 | 需支持对应的工具调用 schema；“兼容”不保证所有扩展参数通用 |
+
+模型价格和上下文是代码内的可修改预设，不会实时更新。切换模型后需重新核对；官方 CLI 模式不按本项目的 API 单价计算订阅费用。
+
+## 登录方式速查
+
+**API 模式**：运行 `original`，输入 `/login`，选择服务商并设置 API Key、URL、模型及价格。配置位于 `~/.original-agent/config.json`，密钥是本地明文。环境变量可覆盖密钥，推荐只设置当前服务商对应变量，或使用明确的 `ORIGINAL_API_KEY`；不要同时遗留多个服务商的 Key。
+
+**官方客户端模式**：先安装对应 CLI 并加入 PATH，然后执行 `original --subscription codex`、`original --subscription claude` 或 `original --subscription gemini`。登录界面、鉴权、工具权限和额度由官方客户端负责。这只是交互式交接，**不是在 original 内直接使用订阅模型**；已有 API Key 登录不会自动变成订阅计费。本项目不获取浏览器 Cookie，也不复制官方 CLI 的认证缓存。
 
 ## 安装
 
 无需 Rust 的安装方式（预编译 Release；本机不必安装 Rust 工具链）：
 
-> **当前状态（2026-11-05）**：GitHub Releases 仍为空，没有 `original-windows-x86_64.exe` 等附件，因此 `iex (irm …)` / `curl … | sh` 会得到 **HTTP 404**。发布带附件的 Release 之前，请用下面的本机构建安装，或先 `cargo build --release`。
 
 Windows PowerShell（x64）——推荐 `iex (irm …)`（整段字符串一次执行）。不要用会把脚本灌进交互提示符的粘贴/stdin 方式；旧写法 `irm … | iex` 在多数情况下也能用，但不如括号形式稳妥：
 
