@@ -154,6 +154,36 @@ pub fn openai_tool_defs() -> Value {
 }
 
 pub fn dispatch(name: &str, args: &Value, root: &Path) -> String {
+    if !args.is_object() {
+        return "invalid tool input: expected an object".into();
+    }
+    let required: &[&str] = match name {
+        "read" => &["path"],
+        "write" => &["path", "content"],
+        "edit" => &["path", "old_str", "new_str"],
+        "glob" => &["pattern"],
+        "grep" => &["query"],
+        "bash" => &["command"],
+        _ => &[],
+    };
+    for key in required {
+        if args.get(*key).and_then(Value::as_str).is_none() {
+            return format!("invalid {name} input: {key} must be a string");
+        }
+    }
+    if name == "read" {
+        for key in ["offset", "limit"] {
+            if let Some(value) = args.get(key) {
+                if value
+                    .as_u64()
+                    .and_then(|n| usize::try_from(n).ok())
+                    .is_none()
+                {
+                    return format!("invalid read input: {key} must be a nonnegative integer");
+                }
+            }
+        }
+    }
     match name {
         "read" => {
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
@@ -193,6 +223,11 @@ pub fn dispatch(name: &str, args: &Value, root: &Path) -> String {
             };
             let mut edits = Vec::new();
             for (i, item) in arr.iter().enumerate() {
+                for key in ["path", "old_str", "new_str"] {
+                    if item.get(key).and_then(Value::as_str).is_none() {
+                        return format!("invalid multi_edit edits[{i}]: {key} must be a string");
+                    }
+                }
                 let path = item
                     .get("path")
                     .and_then(|v| v.as_str())
@@ -394,5 +429,45 @@ mod tests {
         ] {
             assert!(names.contains(&need), "missing {need}");
         }
+    }
+}
+
+#[cfg(test)]
+mod argument_safety_tests {
+    use super::*;
+    #[test]
+    fn malformed_mutations_preserve_file() {
+        let root = std::env::temp_dir().join(format!("original-arg-safety-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("test.txt"), "keep").unwrap();
+        for (name, args) in [
+            ("write", serde_json::json!({"path":"test.txt"})),
+            (
+                "write",
+                serde_json::json!({"path":"test.txt","content":null}),
+            ),
+            (
+                "edit",
+                serde_json::json!({"path":"test.txt","old_str":"keep"}),
+            ),
+            (
+                "multi_edit",
+                serde_json::json!({"edits":[{"path":"test.txt","old_str":"keep"}]}),
+            ),
+        ] {
+            assert!(dispatch(name, &args, &root).starts_with("invalid"));
+            assert_eq!(
+                std::fs::read_to_string(root.join("test.txt")).unwrap(),
+                "keep"
+            );
+        }
+        assert!(dispatch(
+            "write",
+            &serde_json::json!({"path":"test.txt","content":""}),
+            &root
+        )
+        .contains("wrote"));
+        assert_eq!(std::fs::read_to_string(root.join("test.txt")).unwrap(), "");
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
