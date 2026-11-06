@@ -1,6 +1,7 @@
 //! original — multi-provider Pi-like terminal coding agent (claudius + OpenAI-compatible).
 
 mod agent;
+mod archive;
 mod changes;
 mod commands;
 mod config;
@@ -59,6 +60,9 @@ struct Cli {
     /// Automatically run detected project verification after file-tool edits.
     #[arg(long, requires = "allow_shell")]
     auto_verify: bool,
+    /// Do not write local session archives.
+    #[arg(long)]
+    no_record: bool,
     #[arg(short = 'p', long = "print")]
     print: Option<String>,
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -189,6 +193,7 @@ async fn run_anthropic_turn(
     user_text: &str,
     session: &SharedSession,
 ) -> Result<()> {
+    archive::record("user", serde_json::json!(user_text));
     let before = messages.len();
     messages.push(MessageParam {
         role: MessageRole::User,
@@ -197,6 +202,10 @@ async fn run_anthropic_turn(
 
     match agent.take_turn(client, messages, budget).await {
         Ok(outcome) => {
+            archive::record(
+                "turn",
+                serde_json::to_value(&messages[before..]).unwrap_or_default(),
+            );
             print_turn_delta(before, messages);
             if let Ok(mut s) = session.lock() {
                 s.usage.record_turn(
@@ -212,6 +221,7 @@ async fn run_anthropic_turn(
             if messages.len() == before + 1 {
                 messages.pop();
             }
+            archive::record("error", serde_json::json!(err.to_string()));
             Err(anyhow::anyhow!("agent turn failed: {err}"))
         }
     }
@@ -226,8 +236,18 @@ async fn run_openai_turn(
     max_tokens: u32,
     session: &SharedSession,
 ) -> Result<()> {
-    let usage =
-        openai_client::take_turn(client, model, cwd, history, user_text, max_tokens).await?;
+    archive::record("user", serde_json::json!(user_text));
+    let archive_before = history.len();
+    let response =
+        openai_client::take_turn(client, model, cwd, history, user_text, max_tokens).await;
+    if let Err(e) = &response {
+        archive::record("error", serde_json::json!(e.to_string()));
+    }
+    let usage = response?;
+    archive::record(
+        "turn",
+        serde_json::to_value(&history[archive_before..]).unwrap_or_default(),
+    );
     if let Ok(mut s) = session.lock() {
         s.usage.record_turn(
             usage.input_tokens,
@@ -525,6 +545,7 @@ async fn main() -> Result<()> {
     };
 
     let mut cfg = Config::load()?;
+    archive::start(&cwd, &cfg.model, cli.no_record)?;
     if let Ok(v) = std::env::var("ANTHROPIC_BASE_URL").or_else(|_| std::env::var("OPENAI_BASE_URL"))
     {
         let v = v.trim().to_string();
@@ -645,6 +666,13 @@ async fn main() -> Result<()> {
                 }
                 let _ = rl.add_history_entry(line.as_str());
 
+                if let Some(result) = archive::command(&line, &cwd) {
+                    match result {
+                        Ok(text) => println!("{text}"),
+                        Err(e) => eprintln!("{e}"),
+                    }
+                    continue;
+                }
                 if line == "/diff" {
                     println!("{}", changes::diff());
                     continue;
@@ -770,6 +798,10 @@ async fn main() -> Result<()> {
                     };
                     println!("Verification: running {command}");
                     let (code, out, err) = shell::execute_shell(command, &cwd, 600);
+                    archive::record(
+                        "verification",
+                        serde_json::json!({"exit_code":code,"stdout":out,"stderr":err}),
+                    );
                     println!("{out}\n{err}");
                     if code == 0 {
                         println!("Verification: passed");
