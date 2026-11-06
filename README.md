@@ -141,3 +141,11 @@ original --subscription codex --cwd /path/to/project
 Grok 官方订阅接入尚未确认，`--subscription grok` 明确返回不支持；官方 API 可以通过自定义 OpenAI 兼容配置接入 https://api.x.ai/v1，模型与计费以 xAI 控制台为准。
 
 来源：https://learn.chatgpt.com/docs/auth?surface=cli 、https://code.claude.com/docs/en/headless 、https://geminicli.com/docs/get-started/authentication/ 、https://docs.x.ai/developers/quickstart 。
+
+## 改动回退与验证循环
+
+- `/diff`：按修改批次查看当前进程记录的全文替换 diff（不是最小上下文 diff）。
+- `/undo`、`/undo all`：回退最近一次文件工具修改或本次进程全部记录；文件已被其他程序修改时拒绝回退。
+- `original --allow-shell --auto-verify`：交互模式下文件工具修改后运行项目检测到的验证命令，失败日志送回模型，最多追加 3 轮修复。未开启时明确显示未自动验证。
+
+当前限制：快照仅保存在内存，退出即丢失；不覆盖 Shell/官方 CLI 造成的改动。批量写失败会尝试恢复，恢复失败会报告，不保证断电原子性。撤销遇到中途 I/O 错误可能部分完成。自动验证仍沿用 --allow-shell，尚未实现独立验证权限；一次性 -p 模式暂不自动验证。项目测试可执行任意代码，只对可信仓库启用。

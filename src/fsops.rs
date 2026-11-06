@@ -48,7 +48,7 @@ pub fn write_text(root: &Path, path: &str, content: &str) -> Result<String> {
     if let Some(parent) = resolved.parent() {
         fs::create_dir_all(parent).with_context(|| format!("mkdir {}", parent.display()))?;
     }
-    fs::write(&resolved, content)
+    crate::changes::apply(vec![(resolved.clone(), content.as_bytes().to_vec())])
         .with_context(|| format!("write failed {}", resolved.display()))?;
     Ok(format!(
         "wrote {} bytes to {}",
@@ -74,7 +74,7 @@ pub fn edit_once(root: &Path, path: &str, old_str: &str, new_str: &str) -> Resul
         );
     }
     let updated = content.replacen(old_str, new_str, 1);
-    fs::write(&resolved, updated)
+    crate::changes::apply(vec![(resolved.clone(), updated.into_bytes())])
         .with_context(|| format!("edit write failed {}", resolved.display()))?;
     Ok(format!(
         "edited {} (1 replacement)",
@@ -132,10 +132,14 @@ pub fn multi_edit(root: &Path, edits: &[FileEdit]) -> Result<String> {
         *counts.entry(resolved).or_insert(0) += 1;
     }
 
+    crate::changes::apply(
+        by_path
+            .iter()
+            .map(|(p, (_, next))| (p.clone(), next.as_bytes().to_vec()))
+            .collect(),
+    )?;
     let mut report = Vec::new();
-    for (path, (rel, next)) in &by_path {
-        fs::write(path, next)
-            .with_context(|| format!("multi_edit write failed {}", path.display()))?;
+    for (path, (rel, _next)) in &by_path {
         report.push(format!(
             "{}: {} replacement(s)",
             rel,
