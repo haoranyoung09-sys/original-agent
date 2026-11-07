@@ -16,6 +16,7 @@ pub enum EffortLevel {
     #[default]
     Medium,
     High,
+    Max,
 }
 
 impl EffortLevel {
@@ -23,7 +24,8 @@ impl EffortLevel {
         match self {
             Self::Low => Self::Medium,
             Self::Medium => Self::High,
-            Self::High => Self::Low,
+            Self::High => Self::Max,
+            Self::Max => Self::Low,
         }
     }
 
@@ -32,6 +34,7 @@ impl EffortLevel {
             Self::Low => "low",
             Self::Medium => "medium",
             Self::High => "high",
+            Self::Max => "max",
         }
     }
 
@@ -40,7 +43,8 @@ impl EffortLevel {
         match self {
             Self::Low => Effort::Low,
             Self::Medium => Effort::Medium,
-            Self::High => Effort::Max,
+            Self::High => Effort::High,
+            Self::Max => Effort::Max,
         }
     }
 }
@@ -57,8 +61,9 @@ impl std::str::FromStr for EffortLevel {
         match s.trim().to_ascii_lowercase().as_str() {
             "low" | "l" => Ok(Self::Low),
             "medium" | "med" | "m" => Ok(Self::Medium),
-            "high" | "h" | "max" => Ok(Self::High),
-            other => Err(format!("未知 effort: {other}（可用 low|medium|high）")),
+            "high" | "h" => Ok(Self::High),
+            "max" => Ok(Self::Max),
+            other => Err(format!("未知 effort: {other}（可用 low|medium|high|max）")),
         }
     }
 }
@@ -147,10 +152,13 @@ mod tests {
     fn effort_parse_and_cycle() {
         assert_eq!("low".parse::<EffortLevel>().unwrap(), EffortLevel::Low);
         assert_eq!("MED".parse::<EffortLevel>().unwrap(), EffortLevel::Medium);
-        assert_eq!("max".parse::<EffortLevel>().unwrap(), EffortLevel::High);
+        assert_eq!("max".parse::<EffortLevel>().unwrap(), EffortLevel::Max);
         assert!("nope".parse::<EffortLevel>().is_err());
-        assert_eq!(EffortLevel::Low.cycle().cycle().cycle(), EffortLevel::Low);
-        assert_eq!(EffortLevel::High.to_api_effort(), claudius::Effort::Max);
+        assert_eq!(
+            EffortLevel::Low.cycle().cycle().cycle().cycle(),
+            EffortLevel::Low
+        );
+        assert_eq!(EffortLevel::High.to_api_effort(), claudius::Effort::High);
     }
 
     #[test]

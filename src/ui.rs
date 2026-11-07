@@ -227,7 +227,7 @@ pub fn print_help_panel() {
 /status           状态
 /clear            清空对话（用量保留）
 /help  /exit      帮助 / 退出
-Shift+Tab         思考强度 low → medium → high
+Shift+Tab         思考强度 low → medium → high → max
 original -p \"…\"   一次性（需已登录）
 工具               project_overview / glob / grep / read / edit / multi_edit / write / verify / bash"
         )
@@ -240,9 +240,10 @@ pub fn print_turn_footer(session: &SessionState, cfg: &Config) {
 
 fn effort_color(effort: crate::session::EffortLevel) -> &'static str {
     match effort {
-        crate::session::EffortLevel::Low => "36",
-        crate::session::EffortLevel::Medium => "33",
+        crate::session::EffortLevel::Low => "37",
+        crate::session::EffortLevel::Medium => "32",
         crate::session::EffortLevel::High => "35",
+        crate::session::EffortLevel::Max => "31",
     }
 }
 pub fn color_input(text: &str, effort: crate::session::EffortLevel) -> String {
@@ -330,8 +331,8 @@ mod input_tests {
 
     #[test]
     fn effort_colors_cycle_contract() {
-        assert_eq!(effort_color(EffortLevel::Low), "36");
-        assert_eq!(effort_color(EffortLevel::Medium), "33");
+        assert_eq!(effort_color(EffortLevel::Low), "37");
+        assert_eq!(effort_color(EffortLevel::Medium), "32");
         assert_eq!(effort_color(EffortLevel::High), "35");
     }
 }

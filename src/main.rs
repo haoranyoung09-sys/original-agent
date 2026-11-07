@@ -21,7 +21,7 @@ mod workspace;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use clap::Parser;
 use claudius::{
     Agent, Anthropic, Budget, ContentBlock, MessageParam, MessageParamContent, MessageRole,
@@ -365,11 +365,43 @@ impl rustyline::validate::Validator for ReplHelper {
     }
 }
 
-fn read_line(
-    rl: &mut Editor<ReplHelper, rustyline::history::DefaultHistory>,
-    prompt: &str,
-) -> String {
-    rl.readline(prompt).unwrap_or_default().trim().to_string()
+// A dedicated editor keeps menu bindings out of the conversation and its history.
+fn choose(title: &str, options: &[&str]) -> Result<usize> {
+    use std::io::{IsTerminal, Write};
+    anyhow::ensure!(std::io::stdin().is_terminal(), "登录菜单需要交互终端");
+    let mut menu = rustyline::DefaultEditor::new()?;
+    use std::sync::atomic::{AtomicIsize, Ordering};
+    struct Step(Arc<AtomicIsize>, isize);
+    impl ConditionalEventHandler for Step {
+        fn handle(&self, _: &Event, _: RepeatCount, _: bool, _: &EventContext) -> Option<Cmd> {
+            self.0.store(self.1, Ordering::Relaxed);
+            Some(Cmd::AcceptLine)
+        }
+    }
+    let direction = Arc::new(AtomicIsize::new(0));
+    for (key, step) in [(KeyCode::Up, -1), (KeyCode::Down, 1)] {
+        menu.bind_sequence(
+            KeyEvent(key, Modifiers::NONE),
+            EventHandler::Conditional(Box::new(Step(direction.clone(), step))),
+        );
+    }
+    menu.bind_sequence(KeyEvent(KeyCode::Esc, Modifiers::NONE), Cmd::Interrupt);
+    println!("{title}（↑↓ 选择，Enter 确认，Esc 取消）");
+    let mut index = 0;
+    loop {
+        for (i, label) in options.iter().enumerate() {
+            println!("{} {label}", if i == index { ">" } else { " " });
+        }
+        let line = menu.readline("")?;
+        match direction.swap(0, Ordering::Relaxed) {
+            -1 => index = (index + options.len() - 1) % options.len(),
+            1 => index = (index + 1) % options.len(),
+            0 if line.is_empty() => return Ok(index),
+            _ => (),
+        }
+        print!("\x1b[{}A\r\x1b[J", options.len() + 1);
+        std::io::stdout().flush()?;
+    }
 }
 
 /// Fill context window + token prices from the built-in public catalog.
@@ -417,101 +449,45 @@ fn do_login(
     agent: &OriginalAgent,
     backend: &mut Option<Backend>,
 ) -> Result<()> {
-    println!("— /login — 选择服务商预设 —");
-    let list = presets();
-    for (i, p) in list.iter().enumerate() {
-        println!(
-            "  {}. {}  [{}]  model={}",
-            i + 1,
-            p.label,
-            p.api_style,
-            p.default_model
-        );
-    }
-    println!("  0. 保持当前（仅改 Key / URL / 模型）");
-
-    let choice = read_line(rl, "选择编号: ");
-    if !choice.is_empty() && choice != "0" {
-        let idx: usize = choice.parse().context("请输入数字编号")?;
-        let preset = list.get(idx.wrapping_sub(1)).context("编号超出范围")?;
-        // Custom appears twice — distinguish by api_style via label index.
-        cfg.provider = if preset.label.starts_with("自定义") {
-            ProviderId::Custom
-        } else {
-            preset.id
-        };
-        cfg.api_style = preset.api_style;
-        cfg.base_url = preset.default_base_url.to_string();
-        cfg.model = preset.default_model.to_string();
-        cfg.context_window = preset.suggest_context_window;
-        {
-            cfg.pricing.input_per_mtok = preset.suggest_input_per_mtok;
-        }
-        {
-            cfg.pricing.output_per_mtok = preset.suggest_output_per_mtok;
-        }
-        println!(
-            "已选: {} · {} · {}",
-            preset.label, preset.api_style, preset.default_model
-        );
-    }
-
-    let existing = cfg
-        .api_key
-        .as_ref()
-        .map(|_| "***".to_string())
-        .unwrap_or_else(|| "(空)".into());
-
-    let key_line = read_line(rl, &format!("API Key [{existing}]（回车保留）: "));
-    if !key_line.is_empty() {
-        cfg.api_key = Some(key_line);
-    }
-    if !cfg.has_api_key() && Config::resolve_api_key_from_env().is_none() {
-        bail!("未提供 API Key。可粘贴 Key，或设置 ORIGINAL_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY。");
-    }
-
-    let style_hint = format!("{}（回车保留，或输入 anthropic / openai）", cfg.api_style);
-    let style_line = read_line(rl, &format!("API 风格 [{style_hint}]: "));
-    if !style_line.is_empty() {
-        match style_line.to_ascii_lowercase().as_str() {
-            "anthropic" | "a" => cfg.api_style = ApiStyle::Anthropic,
-            "openai" | "o" => cfg.api_style = ApiStyle::OpenAI,
-            other => bail!("未知 API 风格: {other}"),
-        }
-    }
-
-    let base_default = if cfg.base_url.is_empty() {
-        match cfg.api_style {
-            ApiStyle::Anthropic => "https://api.anthropic.com",
-            ApiStyle::OpenAI => "https://api.openai.com/v1",
-        }
+    let choice = choose(
+        "选择服务商",
+        &["Anthropic", "OpenAI", "DeepSeek", "自定义服务"],
+    )?;
+    let id = [
+        ProviderId::Anthropic,
+        ProviderId::OpenAI,
+        ProviderId::DeepSeekOpenAI,
+        ProviderId::Custom,
+    ][choice];
+    let preset = presets()
+        .iter()
+        .find(|p| p.id == id && (id != ProviderId::Custom || p.api_style == ApiStyle::OpenAI))
+        .context("服务商预设不存在")?;
+    let mut next = cfg.clone();
+    next.provider = id;
+    next.api_style = preset.api_style;
+    next.base_url = if id == ProviderId::Custom {
+        rl.readline("服务地址: ")?.trim().to_owned()
     } else {
-        cfg.base_url.as_str()
+        preset.default_base_url.into()
     };
-    let base_line = read_line(rl, &format!("base URL [{base_default}]: "));
-    if !base_line.is_empty() {
-        cfg.base_url = base_line;
-    } else if cfg.base_url.is_empty() {
-        cfg.base_url = base_default.to_string();
+    next.model = preset.default_model.into();
+    next.context_window = preset.suggest_context_window;
+    next.pricing.input_per_mtok = preset.suggest_input_per_mtok;
+    next.pricing.output_per_mtok = preset.suggest_output_per_mtok;
+    next.pricing.cache_read_per_mtok =
+        model_catalog::lookup(&next.model).and_then(|m| m.cache_read_per_mtok);
+    if cfg.base_url != next.base_url {
+        next.api_key = None;
     }
-
-    let model_default = if cfg.model.is_empty() {
-        "my-model"
-    } else {
-        cfg.model.as_str()
-    };
-    let model_line = read_line(rl, &format!("模型名 [{model_default}]: "));
-    if !model_line.is_empty() {
-        cfg.model = model_line;
-    } else if cfg.model.is_empty() {
-        cfg.model = model_default.to_string();
+    let key = rl.readline("API Key: ")?;
+    if !key.trim().is_empty() {
+        next.api_key = Some(key.trim().into());
     }
-
-    apply_model_pricing_and_context(cfg);
-
-    cfg.save().context("保存配置失败")?;
-    *backend = Some(build_backend(cfg)?);
-
+    let client = build_backend(&next)?;
+    next.save()?;
+    *cfg = next;
+    *backend = Some(client);
     {
         let mut s = session.lock().unwrap();
         s.logged_in = true;
@@ -725,6 +701,27 @@ async fn main() -> Result<()> {
                         continue;
                     }
                     commands::SlashAction::Login => {
+                        let mode = (|| -> Result<bool> {
+                            if choose("登录方式", &["API", "订阅"])? == 0 {
+                                return Ok(true);
+                            }
+                            let clients = [
+                                subscription::Client::Codex,
+                                subscription::Client::Claude,
+                                subscription::Client::Gemini,
+                            ];
+                            let i = choose("订阅服务", &["ChatGPT / Codex", "Claude", "Gemini"])?;
+                            subscription::launch(clients[i], &cwd)?;
+                            Ok(false)
+                        })();
+                        match mode {
+                            Ok(true) => (),
+                            Ok(false) => continue,
+                            Err(e) => {
+                                eprintln!("登录已结束: {e}");
+                                continue;
+                            }
+                        }
                         if let Err(e) = do_login(&mut rl, &mut cfg, &session, &agent, &mut backend)
                         {
                             eprintln!("登录失败: {e:#}");
@@ -896,7 +893,7 @@ mod wire_tests {
     fn effort_cycles_like_shift_tab() {
         assert_eq!(EffortLevel::Low.cycle(), EffortLevel::Medium);
         assert_eq!(EffortLevel::Medium.cycle(), EffortLevel::High);
-        assert_eq!(EffortLevel::High.cycle(), EffortLevel::Low);
+        assert_eq!(EffortLevel::High.cycle(), EffortLevel::Max);
     }
 }
 
