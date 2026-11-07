@@ -90,6 +90,75 @@ pub fn undo(all: bool) -> Result<String> {
     }
     Ok("Undo complete (file-tool changes only)".into())
 }
+/// Fingerprint dirty files only, including files already dirty before this turn.
+pub type DirtyFiles = std::collections::BTreeMap<PathBuf, Option<u64>>;
+pub fn dirty_files(root: &std::path::Path) -> Option<DirtyFiles> {
+    use std::hash::Hasher;
+    use std::io::Read;
+    let output = std::process::Command::new("git")
+        .current_dir(root)
+        .args([
+            "ls-files",
+            "--modified",
+            "--others",
+            "--exclude-standard",
+            "-z",
+            "--",
+            ".",
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let mut files = DirtyFiles::new();
+    for raw in output.stdout.split(|c| *c == 0).filter(|s| !s.is_empty()) {
+        let path = root.join(std::str::from_utf8(raw).ok()?);
+        let digest = match std::fs::symlink_metadata(&path) {
+            Ok(meta) if meta.is_file() => {
+                let mut reader = std::fs::File::open(&path).ok()?;
+                let mut hash = std::collections::hash_map::DefaultHasher::new();
+                let mut buf = [0; 32768];
+                loop {
+                    let n = reader.read(&mut buf).ok()?;
+                    if n == 0 {
+                        break;
+                    }
+                    hash.write(&buf[..n]);
+                }
+                Some(hash.finish())
+            }
+            _ => None,
+        };
+        files.insert(path, digest);
+    }
+    Some(files)
+}
+pub fn changed_paths(
+    before: &Option<DirtyFiles>,
+    after: &Option<DirtyFiles>,
+) -> std::collections::BTreeSet<PathBuf> {
+    match (before, after) {
+        (Some(a), Some(b)) => a
+            .keys()
+            .chain(b.keys())
+            .filter(|p| a.get(*p) != b.get(*p))
+            .cloned()
+            .collect(),
+        _ => Default::default(),
+    }
+}
+
+pub fn paths_since(revision: usize) -> std::collections::BTreeSet<PathBuf> {
+    history()
+        .lock()
+        .unwrap()
+        .iter()
+        .skip(revision)
+        .flatten()
+        .map(|change| change.path.clone())
+        .collect()
+}
 pub fn diff() -> String {
     let log = history().lock().unwrap();
     let mut out = String::new();

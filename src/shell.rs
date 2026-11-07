@@ -21,6 +21,28 @@ pub fn shell_enabled() -> bool {
 
 /// Run a shell command in `cwd` with a soft timeout.
 pub fn execute_shell(command: &str, cwd: &PathBuf, timeout_secs: u64) -> (i32, String, String) {
+    if !SHELL_ENABLED.load(Ordering::Relaxed) {
+        return (
+            126,
+            String::new(),
+            "Shell disabled; restart with --allow-shell to authorize unrestricted commands.".into(),
+        );
+    }
+    run_command(command, cwd, timeout_secs)
+}
+
+pub fn verify_project(command: &str, cwd: &PathBuf) -> (i32, String, String) {
+    if crate::fsops::suggest_verify_command(cwd) != Some(command) {
+        return (
+            126,
+            String::new(),
+            "Unrecognized verification command".into(),
+        );
+    }
+    run_command(command, cwd, 600)
+}
+
+fn run_command(command: &str, cwd: &PathBuf, timeout_secs: u64) -> (i32, String, String) {
     let timeout = timeout_secs
         .clamp(1, 600)
         .min(TIMEOUT_LIMIT.load(Ordering::Relaxed));
@@ -34,13 +56,6 @@ pub fn execute_shell(command: &str, cwd: &PathBuf, timeout_secs: u64) -> (i32, S
     result
 }
 fn execute_inner(command: &str, cwd: &PathBuf, timeout_secs: u64) -> (i32, String, String) {
-    if !SHELL_ENABLED.load(Ordering::Relaxed) {
-        return (
-            126,
-            String::new(),
-            "Shell disabled; restart with --allow-shell to authorize unrestricted commands.".into(),
-        );
-    }
     use std::io::Read;
     use std::process::Stdio;
     #[cfg(windows)]

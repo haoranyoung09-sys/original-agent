@@ -85,7 +85,7 @@ The official client owns login, permissions, sessions and billing. This opens it
 | `/export` | Export the current archive as Markdown |
 | `/clear`, `/help`, `/exit` | Clear conversation, show help, exit |
 
-Shell execution is disabled by default. For trusted projects, `original --allow-shell --auto-verify` enables interactive automatic verification with up to three repair rounds. Build/test scripts execute project code; this is not a sandbox. One-shot `-p` mode does not currently run the automatic verification loop.
+Use `original --auto-verify` in trusted projects to run detected tests, which execute repository code. Interactive sessions allow up to three repair turns. One-shot mode verifies once. General shell access requires a separate opt-in.
 
 Snapshots are in-memory and cover file tools only, not shell or external CLI changes. Batch write failures trigger attempted restoration, not crash-proof transactions. Undo can partially fail on I/O errors.
 
