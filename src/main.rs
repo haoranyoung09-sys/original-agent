@@ -736,7 +736,9 @@ async fn main() -> Result<()> {
 
     loop {
         let width = rl.dimensions().map(|(cols, _)| cols).unwrap_or(60).max(4);
-        let width = ui::terminal_width(width);
+        // Leave the last terminal column unused: writing into it can wrap the
+        // frame onto a second line in Windows Terminal and other PTYs.
+        let width = ui::input_frame_width(ui::terminal_width(width));
         rl.helper_mut().unwrap().input_frame = true;
         rl.helper_mut().unwrap().frame_width = width;
         let prompt = ui::input_prompt(width);
