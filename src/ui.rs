@@ -362,7 +362,10 @@ mod input_tests {
             let width = input_frame_width(columns);
             assert!(width <= columns);
             assert_eq!(width, columns.saturating_sub(1).max(1));
-            assert_eq!(input_prompt(width).lines().next().unwrap().chars().count(), width);
+            assert_eq!(
+                input_prompt(width).lines().next().unwrap().chars().count(),
+                width
+            );
         }
     }
 
