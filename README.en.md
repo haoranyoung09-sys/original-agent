@@ -4,6 +4,15 @@
 
 Explore code, edit files, and run project tests from your terminal. Original is a Rust coding agent with Anthropic and OpenAI-compatible backends, file-edit undo, and local session history. Its terminal interface draws on [Pi](https://github.com/badlogic/pi-mono).
 
+## Install the v0.3.10 source tag
+
+Tag `v0.3.10` includes compact feedback for repeated verification failures and a terminal input-frame wrapping fix. Its Cargo package reports `0.3.9`. The release workflow requires matching versions, so install this tag from source with Rust.
+
+```sh
+cargo install --locked --git https://github.com/haoranyoung09-sys/original-agent --tag v0.3.10 original-agent
+original --version
+```
+
 ## Architecture
 
 - Rust 2021, Tokio for async execution, Clap for CLI arguments, and Rustyline for terminal input.

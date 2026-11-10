@@ -4,6 +4,15 @@
 
 Original은 Rust로 만든 터미널 코딩 에이전트입니다. 자연어로 코드를 검색하고 파일을 수정한 뒤 프로젝트 테스트를 실행할 수 있습니다. 파일 편집을 되돌리거나 로컬에 저장한 대화 기록을 열 수도 있습니다.
 
+## v0.3.10 소스 설치
+
+태그 `v0.3.10`에는 반복되는 검증 오류 로그를 줄이는 변경과 터미널 오른쪽 끝에서 입력 테두리가 줄바꿈되는 문제의 수정이 포함되어 있습니다. 이 태그의 Cargo 버전과 프로그램에 표시되는 버전은 `0.3.9`입니다. 릴리스 빌드에는 태그와 패키지 버전이 일치해야 하므로 이 태그는 Rust로 직접 설치하세요.
+
+```sh
+cargo install --locked --git https://github.com/haoranyoung09-sys/original-agent --tag v0.3.10 original-agent
+original --version
+```
+
 ## 설치
 
 Windows (PowerShell)

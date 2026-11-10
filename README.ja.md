@@ -4,6 +4,15 @@
 
 Original は Rust 製のターミナル向けコーディングエージェントです。自然言語でコードを検索し、ファイルを編集し、プロジェクトのテストを実行できます。編集の取り消しとセッションのローカル保存にも対応しています。
 
+## v0.3.10 をソースからインストール
+
+タグ `v0.3.10` では、検証エラーが繰り返された際のログを短縮し、端末の右端で入力枠が折り返される問題を修正しました。Cargo のバージョンは `0.3.9` で、実行時にもこの番号が表示されます。リリースにはタグと Cargo のバージョンの一致が必要なため、このタグは Rust でビルドしてください。
+
+```sh
+cargo install --locked --git https://github.com/haoranyoung09-sys/original-agent --tag v0.3.10 original-agent
+original --version
+```
+
 ## インストール
 
 Windows (PowerShell)
