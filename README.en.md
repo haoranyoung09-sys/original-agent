@@ -1,8 +1,8 @@
 # original-agent
 
-[简体中文](README.md) | **English**
+[简体中文](README.md) · **English** · [日本語](README.ja.md) · [한국어](README.ko.md)
 
-A Rust terminal coding agent inspired by [Pi](https://github.com/badlogic/pi-mono). The executable is `original`. Current version **0.3.7** (matches `Cargo.toml` and GitHub Release `v0.3.7`). This is an independent project, not an official Pi port or a product affiliated with Anthropic, OpenAI, or Google.
+Explore code, edit files, and run project tests from your terminal. Original is a Rust coding agent with Anthropic and OpenAI-compatible backends, file-edit undo, and local session history. Its terminal interface draws on [Pi](https://github.com/badlogic/pi-mono).
 
 ## Architecture
 
@@ -70,7 +70,7 @@ Build from source with stable Rust and platform build tools:
 cargo install --locked --git https://github.com/haoranyoung09-sys/original-agent.git original-agent
 ```
 
-From a local checkout: `cargo install --locked --path . --force`. Windows can run `scripts/install-original.ps1`; Unix can run `sh scripts/install-original.sh`. The Cargo bin directory must be on `PATH`. The crate is not published to crates.io. If dependencies are already cached, `cargo install` accepts `--offline`. A published Release can lag behind unreleased local commits; `v0.3.7` matches the version in `Cargo.toml` on the default branch.
+From a local checkout: `cargo install --locked --path . --force`. Windows can run `scripts/install-original.ps1`; Unix can run `sh scripts/install-original.sh`. The Cargo bin directory must be on `PATH`. The crate is not published to crates.io. If dependencies are already cached, `cargo install` accepts `--offline`. A published Release can lag behind unreleased local commits.
 
 ## Authentication
 

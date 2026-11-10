@@ -2,7 +2,7 @@
 name = "original-agent"
 version = "0.3.9"
 edition = "2021"
-description = "original — Pi-like multi-provider terminal coding agent"
+description = "Rust terminal coding agent with multi-provider support, project verification, and local session history"
 license = "MIT"
 readme = "README.md"
 

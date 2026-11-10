@@ -1,9 +1,8 @@
 # original-agent
 
-**简体中文** | [English](README.en.md)
+**简体中文** · [English](README.en.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
-Rust 编写的多厂商终端 coding agent，交互参考 [Pi](https://github.com/badlogic/pi-mono)。命令名为 `original`。当前版本 **0.3.7**（与 `Cargo.toml` 及 GitHub Release `v0.3.7` 一致）。
-
+在终端里用自然语言查代码、改文件、运行项目测试。Original 以 Rust 构建，支持 Anthropic 和 OpenAI 兼容 API，内置改动回退和本地会话归档。交互设计参考 [Pi](https://github.com/badlogic/pi-mono)。
 
 ## 技术架构与 SDK
 
@@ -100,7 +99,7 @@ sh install.sh v0.3.7
 
 更新时重复同一条安装命令。脚本校验后覆盖同一路径上的二进制。Windows 上如果 `original.exe` 正在运行，覆盖会失败并中止，已安装的文件保持不变；先退出正在运行的 `original` 再更新。
 
-维护者发布：推送与 Cargo.toml 版本相同的标签（当前为 `v0.3.7`）。Release 工作流构建 Windows x64、Linux x64、macOS Intel 与 Apple Silicon，并附带 `.sha256`。脚本只做完整性校验，不提供独立代码签名。目标 Release 缺少对应附件时安装失败，不会覆盖已有安装。离线/自测可用 `-BaseUrl` / `ORIGINAL_INSTALL_BASE` 指向本地假 Release 目录，详见 [无 Rust 安装归档](docs/archive/2026-11-05-no-rust-install.md)。
+维护者发布：推送与 Cargo.toml 版本相同的标签。Release 工作流构建 Windows x64、Linux x64、macOS Intel 与 Apple Silicon，并附带 `.sha256`。脚本只做完整性校验，不提供独立代码签名。目标 Release 缺少对应附件时安装失败，不会覆盖已有安装。离线/自测可用 `-BaseUrl` / `ORIGINAL_INSTALL_BASE` 指向本地假 Release 目录，详见 [无 Rust 安装归档](docs/archive/2026-11-05-no-rust-install.md)。
 
 ### 从源码安装
 
