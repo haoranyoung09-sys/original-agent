@@ -4,7 +4,13 @@ use crate::config::Config;
 use crate::session::SessionState;
 
 fn color_enabled() -> bool {
-    std::env::var_os("NO_COLOR").is_none()
+    // NO_COLOR disables ANSI styling only when set to a non-empty value.
+    // An empty value is equivalent to leaving the variable unset.
+    !no_color_disables(std::env::var_os("NO_COLOR").as_deref())
+}
+
+fn no_color_disables(value: Option<&std::ffi::OsStr>) -> bool {
+    value.is_some_and(|value| !value.is_empty())
 }
 
 fn c(code: &str, text: &str) -> String {
@@ -43,6 +49,16 @@ pub fn print_answer(text: &str) {
     if !text.trim().is_empty() {
         println!("{text}\n");
     }
+}
+
+#[cfg(test)]
+#[test]
+fn no_color_follows_nonempty_value_convention() {
+    use std::ffi::OsStr;
+    assert!(!no_color_disables(None));
+    assert!(!no_color_disables(Some(OsStr::new(""))));
+    assert!(no_color_disables(Some(OsStr::new("1"))));
+    assert!(no_color_disables(Some(OsStr::new("0"))));
 }
 
 #[cfg(test)]
