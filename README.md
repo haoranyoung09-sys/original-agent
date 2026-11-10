@@ -4,6 +4,15 @@
 
 在终端里用自然语言查代码、改文件、运行项目测试。Original 以 Rust 构建，支持 Anthropic 和 OpenAI 兼容 API，内置改动回退和本地会话归档。交互设计参考 [Pi](https://github.com/badlogic/pi-mono)。
 
+## 安装 v0.3.10 源码
+
+标签 `v0.3.10` 包含减少重复验证日志和修复终端输入框换行的改动。该标签的 Cargo 版本为 `0.3.9`，因此程序显示 `0.3.9`。发布流程要求两者一致，该标签请使用 Rust 工具链从源码安装。
+
+```sh
+cargo install --locked --git https://github.com/haoranyoung09-sys/original-agent --tag v0.3.10 original-agent
+original --version
+```
+
 ## 技术架构与 SDK
 
 本项目是 Rust 2021 编写的独立终端应用，不是 Pi 的 Rust 官方版本，也不隶属于 Anthropic、OpenAI 或 Google。
