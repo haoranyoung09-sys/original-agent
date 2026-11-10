@@ -19,10 +19,58 @@ pub struct ReadRange {
     pub limit: Option<usize>,
 }
 
+fn extension(path: &Path) -> String {
+    path.extension()
+        .and_then(|v| v.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+}
+
+fn office_bytes(path: &Path, content: Option<&str>) -> Result<Vec<u8>> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let mut child = Command::new("python")
+        .args(["-I", "-X", "utf8", "-c", include_str!("office.py")])
+        .arg(if content.is_some() { "write" } else { "read" })
+        .arg(path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("Office documents require Python 3, python-docx and python-pptx")?;
+    if let Some(text) = content {
+        let mut stdin = child.stdin.take().unwrap();
+        let _ = stdin.write_all(text.as_bytes());
+    }
+    let output = child.wait_with_output()?;
+    anyhow::ensure!(
+        output.status.success(),
+        "Office conversion failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(output.stdout)
+}
+
 pub fn read_text(root: &Path, path: &str, range: ReadRange) -> Result<String> {
     let resolved = resolve_in_workspace(root, path)?;
-    let content = fs::read_to_string(&resolved)
-        .with_context(|| format!("read failed {}", resolved.display()))?;
+    let content = match extension(&resolved).as_str() {
+        "docx" | "pptx" => String::from_utf8(office_bytes(&resolved, None)?)?,
+        "png" | "jpg" | "jpeg" | "bmp" | "tif" | "tiff" => {
+            let output = std::process::Command::new("tesseract")
+                .arg(&resolved)
+                .args(["stdout", "-l", "chi_sim+eng"])
+                .output()
+                .context("Install Tesseract OCR and chi_sim + eng language data")?;
+            let diagnostics = String::from_utf8_lossy(&output.stderr);
+            anyhow::ensure!(
+                output.status.success() && !diagnostics.contains("Failed loading language"),
+                "OCR failed: {diagnostics}"
+            );
+            String::from_utf8(output.stdout)?
+        }
+        _ => fs::read_to_string(&resolved)
+            .with_context(|| format!("read failed {}", resolved.display()))?,
+    };
     let lines: Vec<&str> = content.lines().collect();
     let start = range.offset.unwrap_or(1).saturating_sub(1);
     let end = match range.limit {
@@ -48,11 +96,16 @@ pub fn write_text(root: &Path, path: &str, content: &str) -> Result<String> {
     if let Some(parent) = resolved.parent() {
         fs::create_dir_all(parent).with_context(|| format!("mkdir {}", parent.display()))?;
     }
-    crate::changes::apply(vec![(resolved.clone(), content.as_bytes().to_vec())])
+    let bytes = match extension(&resolved).as_str() {
+        "docx" | "pptx" => office_bytes(&resolved, Some(content))?,
+        _ => content.as_bytes().to_vec(),
+    };
+    let size = bytes.len();
+    crate::changes::apply(vec![(resolved.clone(), bytes)])
         .with_context(|| format!("write failed {}", resolved.display()))?;
     Ok(format!(
         "wrote {} bytes to {}",
-        content.len(),
+        size,
         display_rel(root, &resolved)
     ))
 }
