@@ -6,6 +6,8 @@ pub enum SlashAction {
     Clear,
     Help,
     Status,
+    Settings,
+    Usage,
     Login,
     /// `None` means show current model; `Some(name)` switches.
     Model {
@@ -30,6 +32,8 @@ pub fn parse_slash(line: &str) -> SlashAction {
         "/exit" | "/quit" => SlashAction::Exit,
         "/clear" => SlashAction::Clear,
         "/help" | "/?" => SlashAction::Help,
+        "/settings" | "/setting" | "/config" => SlashAction::Settings,
+        "/usage" => SlashAction::Usage,
         "/status" => SlashAction::Status,
         "/login" => SlashAction::Login,
         "/model" => {
@@ -51,6 +55,10 @@ mod tests {
 
     #[test]
     fn parses_core_commands() {
+        for cmd in ["/setting", "/settings", "/config"] {
+            assert_eq!(parse_slash(cmd), SlashAction::Settings);
+        }
+        assert_eq!(parse_slash("/usage"), SlashAction::Usage);
         assert_eq!(parse_slash("/exit"), SlashAction::Exit);
         assert_eq!(parse_slash("/quit"), SlashAction::Exit);
         assert_eq!(parse_slash("  /clear  "), SlashAction::Clear);

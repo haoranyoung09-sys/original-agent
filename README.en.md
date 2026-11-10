@@ -155,3 +155,5 @@ sh scripts/test-installer.sh
 GitHub workflows cover Windows, Linux and macOS. Check actual run results rather than assuming every platform passed. Release tags must match Cargo.toml. Changes and limitations are recorded in [docs/archive](docs/archive).
 
 The application uses [MIT](LICENSE); vendored claudius uses Apache-2.0. See [third-party notices](THIRD_PARTY_NOTICES.md), [security notes](SECURITY.md), and [contribution guidelines](CONTRIBUTING.md).
+
+Local commands: `/settings` (also `/setting`, `/config`) shows configuration and changes effort. `/usage` shows session token counters. `/history` lists project sessions and `/history ID` opens an archive.

@@ -108,63 +108,23 @@ fn print_help() {
     ui::print_help_panel();
 }
 
-fn extract_assistant_text(content: &MessageParamContent) -> String {
-    match content {
-        MessageParamContent::String(s) => s.clone(),
-        MessageParamContent::Array(blocks) => {
-            let mut parts = Vec::new();
-            for block in blocks {
-                match block {
-                    ContentBlock::Text(t) => parts.push(t.text.clone()),
-                    ContentBlock::Thinking(t) if tool_display::thinking_enabled() => {
-                        parts.push(format!("[provider thinking]\n{}", t.thinking))
-                    }
-                    ContentBlock::ToolUse(tu) => {
-                        let input = serde_json::to_string(&tu.input).unwrap_or_default();
-                        let short = if input.len() > 200 {
-                            format!("{}…", input.chars().take(200).collect::<String>())
-                        } else {
-                            input
-                        };
-                        parts.push(format!("[tool_use] {}({})", tu.name, short));
-                    }
-                    ContentBlock::ToolResult(tr) => {
-                        let body = match &tr.content {
-                            Some(claudius::ToolResultBlockContent::String(s)) => {
-                                let s = s.trim();
-                                if s.len() > 240 {
-                                    format!("{}…", s.chars().take(240).collect::<String>())
-                                } else {
-                                    s.to_string()
-                                }
-                            }
-                            Some(_) => "[non-text tool result]".to_string(),
-                            None => String::new(),
-                        };
-                        let err = if tr.is_error.unwrap_or(false) {
-                            " ERROR"
-                        } else {
-                            ""
-                        };
-                        parts.push(format!("[tool_result{err}] {body}"));
-                    }
-                    _ => {}
-                }
-            }
-            parts.join("\n")
-        }
-    }
-}
-
 fn print_turn_delta(before_len: usize, messages: &[MessageParam]) {
     for msg in messages.iter().skip(before_len) {
         match msg.role {
-            MessageRole::Assistant => {
-                let text = extract_assistant_text(&msg.content);
-                if !text.trim().is_empty() {
-                    println!("assistant:\n{text}\n");
+            MessageRole::Assistant => match &msg.content {
+                MessageParamContent::String(text) => ui::print_answer(text),
+                MessageParamContent::Array(blocks) => {
+                    for block in blocks {
+                        match block {
+                            ContentBlock::Text(t) => ui::print_answer(&t.text),
+                            ContentBlock::Thinking(t) if tool_display::thinking_enabled() => {
+                                ui::print_thought(&t.thinking)
+                            }
+                            _ => (),
+                        }
+                    }
                 }
-            }
+            },
             MessageRole::User => {
                 if let MessageParamContent::Array(blocks) = &msg.content {
                     for block in blocks {
@@ -798,6 +758,49 @@ async fn main() -> Result<()> {
                     }
                     commands::SlashAction::Help => {
                         print_help();
+                        continue;
+                    }
+                    commands::SlashAction::Settings => {
+                        let current = session.lock().unwrap().effort;
+                        println!(
+                            "模型 {} · 思考强度 {} · 命令超时 {}s · 自动验证 {}",
+                            cfg.model,
+                            current.as_str(),
+                            cli.command_timeout,
+                            cli.auto_verify
+                        );
+                        let levels = [
+                            session::EffortLevel::Low,
+                            session::EffortLevel::Medium,
+                            session::EffortLevel::High,
+                            session::EffortLevel::Max,
+                        ];
+                        match choose(
+                            "设置思考强度",
+                            &["保留当前设置", "Low", "Medium", "High", "Max"],
+                        ) {
+                            Ok(0) | Err(_) => (),
+                            Ok(i) => {
+                                let mut draft = cfg.clone();
+                                draft.effort = levels[i - 1];
+                                match draft.save() {
+                                    Ok(()) => {
+                                        session.lock().unwrap().effort = draft.effort;
+                                        runtime.lock().unwrap().effort = draft.effort;
+                                        cfg = draft;
+                                        println!("已保存思考强度 {}", cfg.effort.as_str());
+                                    }
+                                    Err(e) => eprintln!("保存失败: {e}"),
+                                }
+                            }
+                        }
+                        continue;
+                    }
+                    commands::SlashAction::Usage => {
+                        let state = session.lock().unwrap();
+                        let u = &state.usage;
+                        println!("本次会话 · 已记录 {} 轮\n输入 {} tokens · 输出 {} tokens\n缓存读取 {} · 缓存创建 {} · 最近上下文 {} tokens",
+                            u.turns, u.input_tokens, u.output_tokens, u.cache_read_tokens, u.cache_creation_tokens, u.last_context_tokens);
                         continue;
                     }
                     commands::SlashAction::Status => {

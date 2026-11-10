@@ -137,7 +137,7 @@ fn markdown(dir: &Path) -> Result<String> {
     Ok(out)
 }
 pub fn command(line: &str, cwd: &Path) -> Option<Result<String>> {
-    if line == "/sessions" {
+    if matches!(line, "/sessions" | "/history") {
         return Some((|| {
             let root = base()?;
             if !root.exists() {
@@ -159,10 +159,17 @@ pub fn command(line: &str, cwd: &Path) -> Option<Result<String>> {
                 }
             }
             rows.sort();
+            if rows.is_empty() {
+                return Ok("当前项目暂无会话记录".into());
+            }
+            rows.reverse();
             Ok(rows.join("\n"))
         })());
     }
-    if let Some(id) = line.strip_prefix("/session show ") {
+    if let Some(id) = line
+        .strip_prefix("/session show ")
+        .or_else(|| line.strip_prefix("/history "))
+    {
         return Some(checked_id(id.trim()).and_then(|dir| markdown(&dir)));
     }
     if line == "/export" {

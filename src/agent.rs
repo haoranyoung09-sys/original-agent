@@ -87,10 +87,11 @@ Vibe coding 工作流:
 2. 小改动用 edit；同一意图涉及多处/多文件时用 multi_edit。
 3. 路径一律相对工作区；禁止逃逸工作区。
 4. Shell 默认关闭：不要假设能跑 bash/verify；没有权限时说明并给出建议命令。
-5. 简洁汇报做了什么；需要时引用工具输出关键片段。
+5. {response_style}
 "#,
             cwd = self.root_std.display(),
             shell = shell,
+            response_style = crate::ui::RESPONSE_STYLE,
         )
     }
 }

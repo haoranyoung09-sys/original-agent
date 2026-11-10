@@ -70,6 +70,37 @@ pub struct ChatMessage {
     pub name: Option<String>,
 }
 
+/// Keep one full copy on the wire. Local history and archive retain every original result.
+fn request_messages(history: &[ChatMessage]) -> Vec<std::borrow::Cow<'_, ChatMessage>> {
+    use std::borrow::Cow;
+    use std::collections::HashMap;
+    let mut seen = HashMap::new();
+    history
+        .iter()
+        .map(|message| {
+            if message.role == "tool" {
+                if let (Some(text), Some(id)) = (
+                    message.content.as_ref().and_then(Value::as_str),
+                    message.tool_call_id.as_deref(),
+                ) {
+                    if text.len() >= 1024 {
+                        let key = (message.name.as_deref(), text);
+                        if let Some(first) = seen.get(&key) {
+                            let mut reference = message.clone();
+                            reference.content = Some(json!(format!(
+                                "Identical output to earlier tool call {first}."
+                            )));
+                            return Cow::Owned(reference);
+                        }
+                        seen.insert(key, id);
+                    }
+                }
+            }
+            Cow::Borrowed(message)
+        })
+        .collect()
+}
+
 fn system_prompt(cwd: &Path) -> String {
     let shell = if cfg!(windows) {
         "Windows PowerShell（bash/verify 默认禁用，需 --allow-shell）"
@@ -80,8 +111,8 @@ fn system_prompt(cwd: &Path) -> String {
         "你是 original，一个运行在本地工作区中的终端 vibe-coding agent。\n\
          工作区: {}\nShell: {shell}\n\
          工具: project_overview / glob / grep / read / write / edit / multi_edit / verify / bash。\n\
-         先摸清项目再改；路径相对工作区；小改 edit、多处 multi_edit；不要编造文件内容。",
-        cwd.display()
+         先摸清项目再改；路径相对工作区；小改 edit、多处 multi_edit；不要编造文件内容。\n{}",
+        cwd.display(), crate::ui::RESPONSE_STYLE
     )
 }
 
@@ -144,7 +175,7 @@ pub async fn take_turn(
     for _round in 0..24 {
         let body = json!({
             "model": model,
-            "messages": history,
+            "messages": request_messages(history),
             "tools": openai_tool_defs(),
             "tool_choice": "auto",
             "max_tokens": max_tokens,
@@ -181,7 +212,7 @@ pub async fn take_turn(
 
         if crate::tool_display::thinking_enabled() {
             if let Some(t) = message.get("reasoning_content").and_then(Value::as_str) {
-                println!("[provider thinking]\n{t}");
+                crate::ui::print_thought(t);
             }
         }
         let content = message.get("content").cloned();
@@ -197,7 +228,7 @@ pub async fn take_turn(
 
         if let Some(Value::String(s)) = &content {
             if !s.trim().is_empty() {
-                println!("assistant:\n{s}\n");
+                crate::ui::print_answer(s);
             }
         } else if let Some(Value::Array(parts)) = &content {
             let mut buf = String::new();
@@ -207,7 +238,7 @@ pub async fn take_turn(
                 }
             }
             if !buf.trim().is_empty() {
-                println!("assistant:\n{buf}\n");
+                crate::ui::print_answer(&buf);
             }
         }
 
@@ -259,6 +290,32 @@ pub async fn take_turn(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn duplicate_results_keep_call_ids_and_original_history() {
+        let text = "abc".repeat(512);
+        let result = |id: &str, body: &str| ChatMessage {
+            role: "tool".into(),
+            name: Some("read".into()),
+            content: Some(json!(body)),
+            tool_call_id: Some(id.into()),
+            tool_calls: None,
+        };
+        let history = vec![
+            result("a", &text),
+            result("b", &text),
+            result("c", "different"),
+        ];
+        let wire = request_messages(&history);
+        assert_eq!(wire[0].content, history[0].content);
+        assert_eq!(wire[1].tool_call_id.as_deref(), Some("b"));
+        assert_eq!(
+            wire[1].content,
+            Some(json!("Identical output to earlier tool call a."))
+        );
+        assert_eq!(wire[2].content, history[2].content);
+        assert_eq!(history[1].content, Some(json!(text)));
+    }
 
     #[test]
     fn completions_url_variants() {

@@ -2,3 +2,8 @@
 
 现有 read 和 write 工具按扩展名处理 DOCX 和 PPTX。写入时以 "# 标题" 创建 Word 一级标题或开始新幻灯片，其余各行进入正文。读取支持段落、幻灯片文本和表格。图片使用 read 提取简体中文和英文。转换在本地运行，工具结果可进入模型对话。
 Install Python 3.9+ and run `python -m pip install "python-docx>=1.1" python-pptx`. For image OCR install Tesseract on PATH with chi_sim and eng trained data. Supported images: PNG, JPEG, BMP and TIFF. Writing creates a new document and replaces any existing layout.
+
+## Worker protocol v1
+
+Rust resolves the workspace path and commits successful writes through its snapshot mechanism. Python receives one UTF-8 JSON request on stdin (version, operation, path, content). stdout returns version and result (text for read, hex bytes for write) or error (kind, message). Exit codes: 0 success, 1 conversion failure, 2 missing dependency. The host enforces a 60-second deadline and 64 MiB response limit.
+`cargo test --offline --locked office_worker -- --ignored` runs the optional Python integration tests. Verified on Windows with Python 3.11, python-docx 1.2.0 and python-pptx 1.0.2: bilingual DOCX and two-slide PPTX round trips with Unicode filenames, and a sleeping worker terminated by the Rust deadline.

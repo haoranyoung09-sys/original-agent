@@ -15,6 +15,43 @@ fn c(code: &str, text: &str) -> String {
     }
 }
 
+pub const RESPONSE_STYLE: &str = "按用户使用的语言自然回答。简单问题直接回答。执行任务时，仅在有实质进展时简短说明；完成后先说结果，再按需要给出文件、验证证据和未解决的问题。省略固定开场、空标题和重复的工具日志。";
+
+fn thought_block(text: &str, styled: bool) -> String {
+    let block = std::iter::once("思考".to_owned())
+        .chain(text.lines().map(|line| format!("│ {line}")))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if styled {
+        format!("\x1b[2;3m{block}\x1b[0m")
+    } else {
+        block
+    }
+}
+
+pub fn print_thought(text: &str) {
+    use std::io::IsTerminal;
+    if !text.trim().is_empty() {
+        eprintln!(
+            "{}",
+            thought_block(text, color_enabled() && std::io::stderr().is_terminal())
+        );
+    }
+}
+
+pub fn print_answer(text: &str) {
+    if !text.trim().is_empty() {
+        println!("{text}\n");
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn thoughts_are_distinct_without_color_and_reset_with_style() {
+    assert_eq!(thought_block("一\ntwo", false), "思考\n│ 一\n│ two");
+    assert!(thought_block("x", true).ends_with("\x1b[0m"));
+}
+
 const LABEL: &str = "38;5;245";
 const ACCENT: &str = "38;5;105";
 const TITLE: &str = "1;38;5;189";
@@ -224,6 +261,9 @@ pub fn print_help_panel() {
             "\
 /login            选服务商 / Key / URL / 模型（价格与上下文自动填写）
 /model [name]     查看或切换模型
+/settings         查看设置、调整思考强度（也可用 /setting）
+/usage            当前会话 token 用量
+/history [ID]     列出项目归档或查看记录
 /status           状态
 /clear            清空对话（用量保留）
 /help  /exit      帮助 / 退出

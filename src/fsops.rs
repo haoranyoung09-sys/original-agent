@@ -27,28 +27,88 @@ fn extension(path: &Path) -> String {
 }
 
 fn office_bytes(path: &Path, content: Option<&str>) -> Result<Vec<u8>> {
-    use std::io::Write;
+    run_office_worker(
+        path,
+        content,
+        include_str!("office.py"),
+        std::time::Duration::from_secs(60),
+    )
+}
+
+fn run_office_worker(
+    path: &Path,
+    content: Option<&str>,
+    script: &str,
+    timeout: std::time::Duration,
+) -> Result<Vec<u8>> {
+    use std::io::{Read, Write};
     use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+    let request = serde_json::to_vec(&serde_json::json!({
+        "version": 1, "operation": if content.is_some() { "write" } else { "read" },
+        "path": path, "content": content
+    }))?;
     let mut child = Command::new("python")
-        .args(["-I", "-X", "utf8", "-c", include_str!("office.py")])
-        .arg(if content.is_some() { "write" } else { "read" })
-        .arg(path)
+        .args(["-I", "-X", "utf8", "-c", script])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::inherit())
         .spawn()
-        .context("Office documents require Python 3, python-docx and python-pptx")?;
-    if let Some(text) = content {
-        let mut stdin = child.stdin.take().unwrap();
-        let _ = stdin.write_all(text.as_bytes());
-    }
-    let output = child.wait_with_output()?;
+        .context("Office dependency: Python 3 executable 'python' is required")?;
+    let mut stdin = child.stdin.take().unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let writer = std::thread::spawn(move || stdin.write_all(&request));
+    let reader = std::thread::spawn(move || {
+        let mut data = Vec::new();
+        stdout.take(64 * 1024 * 1024 + 1).read_to_end(&mut data)?;
+        Ok::<_, std::io::Error>(data)
+    });
+    let start = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if start.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            bail!("Office timeout: exceeded {timeout:?}");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    writer
+        .join()
+        .map_err(|_| anyhow::anyhow!("Office input worker failed"))??;
+    let data = reader
+        .join()
+        .map_err(|_| anyhow::anyhow!("Office output worker failed"))??;
     anyhow::ensure!(
-        output.status.success(),
-        "Office conversion failed: {}",
-        String::from_utf8_lossy(&output.stderr)
+        data.len() <= 64 * 1024 * 1024,
+        "Office response exceeds 64 MiB"
     );
-    Ok(output.stdout)
+    let response: serde_json::Value =
+        serde_json::from_slice(&data).context("Invalid Office JSON response")?;
+    anyhow::ensure!(response["version"] == 1, "Unsupported Office response");
+    if !status.success() {
+        bail!(
+            "Office {}: {}",
+            response["error"]["kind"],
+            response["error"]["message"]
+        );
+    }
+    let value = response["result"]
+        .as_str()
+        .context("Missing Office result")?;
+    if content.is_none() {
+        return Ok(value.as_bytes().to_vec());
+    }
+    anyhow::ensure!(
+        value.len() % 2 == 0 && value.bytes().all(|b| b.is_ascii_hexdigit()),
+        "Invalid Office binary result"
+    );
+    (0..value.len())
+        .step_by(2)
+        .map(|i| Ok(u8::from_str_radix(&value[i..i + 2], 16)?))
+        .collect()
 }
 
 pub fn read_text(root: &Path, path: &str, range: ReadRange) -> Result<String> {
@@ -86,6 +146,14 @@ pub fn read_text(root: &Path, path: &str, range: ReadRange) -> Result<String> {
     }
     let mut out = String::new();
     for (i, line) in lines[start..end].iter().enumerate() {
+        if range.limit.is_none() && i > 0 && out.len() + line.len() + 8 > 12_000 {
+            out.push_str(&format!(
+                "… {} lines remain. Read with offset={} to continue.",
+                end - start - i,
+                start + i + 1
+            ));
+            break;
+        }
         out.push_str(&format!("{:>6}|{}\n", start + i + 1, line));
     }
     Ok(truncate_chars(&out, 80_000))
@@ -238,6 +306,24 @@ pub fn glob_files(root: &Path, pattern: &str) -> Result<String> {
     }
 }
 
+fn match_preview(line: &str, pos: usize, query: &str) -> String {
+    let start = line[..pos]
+        .char_indices()
+        .rev()
+        .nth(59)
+        .map_or(0, |(n, _)| n);
+    let end = line[pos + query.len()..]
+        .char_indices()
+        .nth(100)
+        .map_or(line.len(), |(n, _)| pos + query.len() + n);
+    format!(
+        "{}{}{}",
+        if start > 0 { "…" } else { "" },
+        &line[start..end],
+        if end < line.len() { "…" } else { "" }
+    )
+}
+
 pub fn grep_workspace(root: &Path, query: &str, glob_pat: Option<&str>) -> Result<String> {
     let query = query.trim();
     if query.is_empty() {
@@ -276,8 +362,8 @@ pub fn grep_workspace(root: &Path, query: &str, glob_pat: Option<&str>) -> Resul
             if hits.len() >= MAX_GREP_HITS {
                 break;
             }
-            if line.contains(query) {
-                let preview: String = line.chars().take(200).collect();
+            if let Some(pos) = line.find(query) {
+                let preview = match_preview(line, pos, query);
                 hits.push(format!("{rel_str}:{}:{preview}", i + 1));
             }
         }
@@ -546,26 +632,28 @@ fn split_first_segment(s: &str) -> (Option<&str>, &str) {
 }
 
 fn segment_match(pat: &str, name: &str) -> bool {
-    let pb: Vec<char> = pat.chars().collect();
-    let nb: Vec<char> = name.chars().collect();
-    fn rec(pb: &[char], nb: &[char]) -> bool {
-        match (pb.first(), nb.first()) {
-            (None, None) => true,
-            (Some('*'), _) => {
-                // * within one path segment
-                for i in 0..=nb.len() {
-                    if rec(&pb[1..], &nb[i..]) {
-                        return true;
-                    }
-                }
-                false
-            }
-            (Some('?'), Some(_)) => rec(&pb[1..], &nb[1..]),
-            (Some(a), Some(b)) if a == b => rec(&pb[1..], &nb[1..]),
-            _ => false,
+    let pattern: Vec<char> = pat.chars().collect();
+    let name: Vec<char> = name.chars().collect();
+    let (mut p, mut n) = (0, 0);
+    let mut star = None;
+    let mut retry = 0;
+    while n < name.len() {
+        if pattern.get(p) == Some(&'*') {
+            star = Some(p);
+            retry = n;
+            p += 1;
+        } else if pattern.get(p).is_some_and(|&c| c == '?' || c == name[n]) {
+            p += 1;
+            n += 1;
+        } else if let Some(last) = star {
+            retry += 1;
+            n = retry;
+            p = last + 1;
+        } else {
+            return false;
         }
     }
-    rec(&pb, &nb)
+    pattern[p..].iter().all(|&c| c == '*')
 }
 
 fn display_rel(root: &Path, path: &Path) -> String {
@@ -598,6 +686,87 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn unicode_search_and_wildcards() {
+        let line = format!("{}命中{}", "长".repeat(300), "尾".repeat(300));
+        let snippet = match_preview(&line, line.find("命中").unwrap(), "命中");
+        assert!(snippet.contains("命中") && snippet.starts_with('…') && snippet.ends_with('…'));
+        assert!(segment_match("*项?*.rs", "我的项目.rs"));
+        assert!(!segment_match(&("*a".repeat(48) + "z"), &"a".repeat(96)));
+    }
+
+    #[test]
+    fn default_read_page_can_resume_without_skipping_lines() {
+        let root = temp_root("page");
+        fs::write(root.join("large"), ("x".repeat(7000) + "\n").repeat(3)).unwrap();
+        let first = read_text(
+            &root,
+            "large",
+            ReadRange {
+                offset: None,
+                limit: None,
+            },
+        )
+        .unwrap();
+        assert!(first.contains("2 lines remain. Read with offset=2"));
+        let rest = read_text(
+            &root,
+            "large",
+            ReadRange {
+                offset: Some(2),
+                limit: Some(2),
+            },
+        )
+        .unwrap();
+        assert!(rest.contains("     2|") && rest.contains("     3|"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires Python with python-docx and python-pptx"]
+    fn office_worker_roundtrip() {
+        let root = temp_root("office");
+        for ext in ["docx", "pptx"] {
+            let name = format!("项目 报告.{ext}");
+            write_text(
+                &root,
+                &name,
+                "# 中文标题\nEnglish summary\n# Results\n验证通过",
+            )
+            .unwrap();
+            assert!(fs::read(root.join(&name)).unwrap().starts_with(b"PK"));
+            let text = read_text(
+                &root,
+                &name,
+                ReadRange {
+                    offset: None,
+                    limit: None,
+                },
+            )
+            .unwrap();
+            for expected in ["中文标题", "English summary", "Results", "验证通过"] {
+                assert!(text.contains(expected), "{text}");
+            }
+            if ext == "pptx" {
+                assert!(text.contains("[Slide 2]"));
+            }
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires Python"]
+    fn office_worker_timeout() {
+        let error = run_office_worker(
+            Path::new("report.docx"),
+            None,
+            "import time; time.sleep(30)",
+            std::time::Duration::from_millis(150),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("Office timeout"));
     }
 
     #[test]

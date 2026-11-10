@@ -227,3 +227,5 @@ Grok 官方订阅接入尚未确认，`--subscription grok` 明确返回不支�
 ## 执行状态显示
 
 `original --show-thinking --command-timeout 120`：有则显示服务商返回的思考文本（每次模型响应返回后，不是流式逐字；Anthropic 为 thinking 块，OpenAI 兼容响应为 `reasoning_content`）。`--command-timeout` 默认 600 秒，允许 1–600，同时作为 shell 与自动验证的上限，不影响 HTTP 超时。Anthropic 工具显示指令/路径、耗时和成功/失败背景色；两种后端的 Shell 命令按退出码着色。OpenAI 普通文件工具仍是中性结果文字。NO_COLOR 或非终端输出禁用颜色。未进行付费 API 测试。
+
+本地命令：`/settings`（别名 `/setting`、`/config`）查看配置并设置思考强度；`/usage` 查看当前会话 token 统计；`/history` 列出项目会话，`/history ID` 查看归档。

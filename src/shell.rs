@@ -55,6 +55,40 @@ fn run_command(command: &str, cwd: &PathBuf, timeout_secs: u64) -> (i32, String,
     );
     result
 }
+fn capture_output(mut reader: impl std::io::Read) -> String {
+    const HALF: usize = 40_000;
+    let mut head = Vec::new();
+    let mut tail = std::collections::VecDeque::with_capacity(HALF);
+    let mut total = 0usize;
+    let mut buf = [0; 8192];
+    while let Ok(n) = reader.read(&mut buf) {
+        if n == 0 {
+            break;
+        }
+        total += n;
+        let keep = (HALF - head.len()).min(n);
+        head.extend_from_slice(&buf[..keep]);
+        let rest = &buf[keep..n];
+        tail.drain(..(tail.len() + rest.len()).saturating_sub(HALF));
+        tail.extend(rest.iter().copied());
+    }
+    let skipped = total - head.len() - tail.len();
+    if skipped > 0 {
+        head.extend_from_slice(format!("\n… [{skipped} bytes omitted] …\n").as_bytes());
+    }
+    head.extend(tail);
+    String::from_utf8_lossy(&head).into_owned()
+}
+
+#[cfg(test)]
+#[test]
+fn bounded_log_preserves_failure_tail() {
+    let text = format!("{}final failure", "x".repeat(100_000));
+    let result = capture_output(text.as_bytes());
+    assert!(result.contains("20013 bytes omitted") && result.ends_with("final failure"));
+    assert_eq!(capture_output("中文".as_bytes()), "中文");
+}
+
 fn execute_inner(command: &str, cwd: &PathBuf, timeout_secs: u64) -> (i32, String, String) {
     use std::io::Read;
     use std::process::Stdio;
@@ -80,18 +114,7 @@ fn execute_inner(command: &str, cwd: &PathBuf, timeout_secs: u64) -> (i32, Strin
         Err(e) => return (1, String::new(), e.to_string()),
     };
     fn drain<R: Read + Send + 'static>(mut reader: R) -> std::thread::JoinHandle<String> {
-        std::thread::spawn(move || {
-            let mut saved = Vec::new();
-            let mut buf = [0u8; 8192];
-            while let Ok(n) = reader.read(&mut buf) {
-                if n == 0 {
-                    break;
-                }
-                let keep = n.min(80_000usize.saturating_sub(saved.len()));
-                saved.extend_from_slice(&buf[..keep]);
-            }
-            String::from_utf8_lossy(&saved).into_owned()
-        })
+        std::thread::spawn(move || capture_output(&mut reader))
     }
     let out = drain(child.stdout.take().unwrap());
     let err = drain(child.stderr.take().unwrap());
