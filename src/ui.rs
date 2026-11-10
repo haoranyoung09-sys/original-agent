@@ -264,6 +264,12 @@ pub fn print_status_full(session: &SessionState, cfg: &Config, cwd: &std::path::
     );
 }
 
+/// Keep frame rules inside the visible viewport, including narrow terminals.
+/// The final column is reserved to prevent automatic line wrapping.
+pub fn input_frame_width(terminal_columns: usize) -> usize {
+    terminal_columns.saturating_sub(1).max(1)
+}
+
 /// Pi-like prompt — no frame.
 pub fn input_prompt(width: usize) -> String {
     format!("{}\n❯ ", "─".repeat(width))
@@ -349,6 +355,16 @@ mod input_tests {
     use super::*;
     use crate::config::Config;
     use crate::session::{EffortLevel, SessionState, UsageStats};
+
+    #[test]
+    fn input_frame_reserves_last_terminal_column() {
+        for columns in [1, 2, 4, 40, 80, 120, 200] {
+            let width = input_frame_width(columns);
+            assert!(width <= columns);
+            assert_eq!(width, columns.saturating_sub(1).max(1));
+            assert_eq!(input_prompt(width).lines().next().unwrap().chars().count(), width);
+        }
+    }
 
     #[test]
     fn frame_fills_terminal_width() {
