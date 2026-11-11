@@ -270,10 +270,14 @@ pub async fn take_turn(
             } else {
                 args_raw.to_string()
             };
-            println!("  → tool {fname}({short})");
+            if crate::tool_display::tools_enabled() {
+                println!("  → tool {fname}({short})");
+            }
             let result = dispatch(&fname, &args, cwd);
             let preview: String = result.chars().take(120).collect();
-            println!("  tool result: {}", preview.replace('\n', " "));
+            if crate::tool_display::tools_enabled() {
+                println!("  tool result: {}", preview.replace('\n', " "));
+            }
             history.push(ChatMessage {
                 role: "tool".into(),
                 content: Some(Value::String(result)),

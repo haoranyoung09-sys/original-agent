@@ -70,6 +70,9 @@ struct Cli {
     command_timeout: u64,
     #[arg(long)]
     show_thinking: bool,
+    /// Display tool calls and execution status.
+    #[arg(long)]
+    show_tools: bool,
     #[arg(short = 'p', long = "print")]
     print: Option<String>,
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -145,7 +148,9 @@ fn print_turn_delta(before_len: usize, messages: &[MessageParam]) {
                             } else {
                                 "✓"
                             };
-                            println!("  {mark} tool_result: {preview}");
+                            if tool_display::tools_enabled() {
+                                println!("  {mark} tool_result: {preview}");
+                            }
                         }
                     }
                 }
@@ -543,54 +548,14 @@ fn run_verification(command: &str, cwd: &PathBuf) -> (i32, String, String) {
     (code, out, err)
 }
 
-fn startup_directory(interactive: bool) -> Result<PathBuf> {
-    use std::io::IsTerminal;
-    let current = std::env::current_dir()?;
-    if dirs::home_dir().as_ref() == Some(&current) {
-        if interactive && std::io::stdin().is_terminal() {
-            let mut projects = Vec::new();
-            for base in [
-                current.join("Documents/GitHub"),
-                current.join("Desktop"),
-                current.clone(),
-            ] {
-                for entry in std::fs::read_dir(base).into_iter().flatten().flatten() {
-                    if entry.path().join(".git").exists() {
-                        projects.push(entry.path());
-                    }
-                }
-            }
-            projects.sort();
-            projects.dedup();
-            let mut labels: Vec<_> = projects.iter().map(|p| p.display().to_string()).collect();
-            labels.push("输入项目目录".into());
-            let index = choose(
-                "选择工作区",
-                &labels.iter().map(String::as_str).collect::<Vec<_>>(),
-            )?;
-            if index < projects.len() {
-                return Ok(projects.remove(index));
-            }
-            let mut editor = rustyline::DefaultEditor::new()?;
-            let path = PathBuf::from(editor.readline("项目目录 > ")?.trim());
-            anyhow::ensure!(path.is_dir(), "项目目录不存在");
-            return Ok(path.canonicalize()?);
-        }
-        return Ok(current);
-    }
-    Ok(current
-        .ancestors()
-        .find(|p| p.join(".git").exists())
-        .map(PathBuf::from)
-        .unwrap_or(current))
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     shell::set_timeout_limit(cli.command_timeout);
     tool_display::SHOW_THINKING.store(cli.show_thinking, std::sync::atomic::Ordering::Relaxed);
     tools::set_shell_enabled(cli.allow_shell);
+    shell::enable_prompts();
+    tool_display::SHOW_TOOLS.store(cli.show_tools, std::sync::atomic::Ordering::Relaxed);
 
     let cwd = match cli.cwd {
         Some(p) => {
@@ -601,7 +566,7 @@ async fn main() -> Result<()> {
             };
             std::fs::canonicalize(&p).with_context(|| format!("无法解析 --cwd: {}", p.display()))?
         }
-        None => startup_directory(cli.print.is_none() && cli.message.is_empty())?,
+        None => std::env::current_dir()?,
     };
 
     if let Some(client) = cli.subscription {

@@ -12,6 +12,9 @@ fn safe(text: &str) -> String {
     text.chars().filter(|c| !c.is_control()).take(300).collect()
 }
 pub fn start(id: &str, name: &str, args: &serde_json::Value) {
+    if !tools_enabled() {
+        return;
+    }
     let detail = args
         .get("command")
         .or_else(|| args.get("path"))
@@ -30,6 +33,9 @@ pub fn finish(id: &str, success: bool) {
     }
 }
 pub fn status(title: &str, success: bool, seconds: f64) {
+    if !tools_enabled() {
+        return;
+    }
     use std::io::IsTerminal;
     let label = format!(
         " {} {} · {:.2}s ",
@@ -51,4 +57,9 @@ pub fn status(title: &str, success: bool, seconds: f64) {
 pub static SHOW_THINKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub fn thinking_enabled() -> bool {
     SHOW_THINKING.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub static SHOW_TOOLS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub fn tools_enabled() -> bool {
+    SHOW_TOOLS.load(std::sync::atomic::Ordering::Relaxed)
 }
