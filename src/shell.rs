@@ -11,17 +11,41 @@ pub fn set_timeout_limit(seconds: u64) {
 }
 static SHELL_ENABLED: AtomicBool = AtomicBool::new(false);
 
+static PROMPTS: AtomicBool = AtomicBool::new(false);
+static APPROVAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub fn enable_prompts() {
+    PROMPTS.store(true, Ordering::Relaxed);
+}
+fn can_prompt() -> bool {
+    use std::io::IsTerminal;
+    PROMPTS.load(Ordering::Relaxed)
+        && std::io::stdin().is_terminal()
+        && std::io::stderr().is_terminal()
+}
+fn approve(command: &str, cwd: &PathBuf) -> bool {
+    if !can_prompt() {
+        return false;
+    }
+    let _guard = APPROVAL.lock().unwrap();
+    eprintln!(
+        "执行目录 {:?}\n命令 {:?}\n仅允许这一次？[y/N]",
+        cwd, command
+    );
+    let mut answer = String::new();
+    std::io::stdin().read_line(&mut answer).is_ok()
+        && matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+}
 pub fn set_shell_enabled(enabled: bool) {
     SHELL_ENABLED.store(enabled, Ordering::Relaxed);
 }
 
 pub fn shell_enabled() -> bool {
-    SHELL_ENABLED.load(Ordering::Relaxed)
+    SHELL_ENABLED.load(Ordering::Relaxed) || can_prompt()
 }
 
 /// Run a shell command in `cwd` with a soft timeout.
 pub fn execute_shell(command: &str, cwd: &PathBuf, timeout_secs: u64) -> (i32, String, String) {
-    if !SHELL_ENABLED.load(Ordering::Relaxed) {
+    if !SHELL_ENABLED.load(Ordering::Relaxed) && !approve(command, cwd) {
         return (
             126,
             String::new(),
@@ -39,7 +63,7 @@ pub fn verify_project(command: &str, cwd: &PathBuf) -> (i32, String, String) {
             "Unrecognized verification command".into(),
         );
     }
-    run_command(command, cwd, 600)
+    execute_shell(command, cwd, 600)
 }
 
 fn run_command(command: &str, cwd: &PathBuf, timeout_secs: u64) -> (i32, String, String) {
