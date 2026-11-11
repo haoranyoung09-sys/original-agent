@@ -12,6 +12,7 @@ mod provider;
 mod session;
 mod shell;
 mod subscription;
+mod terminal;
 mod tool_dispatch;
 mod tool_display;
 mod tools;
@@ -51,6 +52,9 @@ enum Backend {
     version
 )]
 struct Cli {
+    /// Use the classic inline terminal interface.
+    #[arg(long)]
+    classic: bool,
     #[arg(long)]
     cwd: Option<PathBuf>,
     /// Open an official CLI; authentication and billing remain with that client.
@@ -551,6 +555,23 @@ fn run_verification(command: &str, cwd: &PathBuf) -> (i32, String, String) {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+    use std::io::IsTerminal;
+    if !cli.classic
+        && std::env::var_os("ORIGINAL_AGENT_HOST").is_none()
+        && cli.subscription.is_none()
+        && cli.print.is_none()
+        && cli.message.is_empty()
+        && std::io::stdin().is_terminal()
+        && std::io::stdout().is_terminal()
+    {
+        let root = cli
+            .cwd
+            .clone()
+            .unwrap_or(std::env::current_dir()?)
+            .canonicalize()?;
+        return terminal::run(&root);
+    }
+
     shell::set_timeout_limit(cli.command_timeout);
     tool_display::SHOW_THINKING.store(cli.show_thinking, std::sync::atomic::Ordering::Relaxed);
     tools::set_shell_enabled(cli.allow_shell);

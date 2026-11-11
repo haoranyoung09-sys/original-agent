@@ -4,6 +4,10 @@
 
 Explore code, edit files, and run project tests from your terminal. Original is a Rust coding agent with Anthropic and OpenAI-compatible backends, file-edit undo, and local session history. Its terminal interface draws on [Pi](https://github.com/badlogic/pi-mono).
 
+## Full-screen terminal
+
+Interactive startup uses a full-screen terminal host. A session index appears at 110 columns and hides on narrower terminals. Page Up / Page Down scroll through output. F10 exits. Use `original --classic` for the inline interface. Login, settings and command authorization retain their existing interactions. Open archives with `/history ID`. The embedded terminal's input prompt follows the conversation.
+
 ## Install the v0.3.10 source tag
 
 Tag `v0.3.10` includes compact feedback for repeated verification failures and a terminal input-frame wrapping fix. Its Cargo package reports `0.3.9`. The release workflow requires matching versions, so install this tag from source with Rust.
