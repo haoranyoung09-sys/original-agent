@@ -262,7 +262,6 @@ impl ConditionalEventHandler for CycleEffortHandler {
 struct ReplHelper {
     session: Option<SharedSession>,
     input_frame: bool,
-    frame_width: usize,
 }
 
 impl rustyline::Helper for ReplHelper {}
@@ -285,10 +284,10 @@ impl rustyline::hint::Hinter for ReplHelper {
             return None;
         }
         let s = self.session.as_ref()?.lock().ok()?;
-        Some(FrameHint(format!(
-            "\n{}",
-            ui::input_footer(&s.model, s.effort, self.frame_width)
-        )))
+        if !_line.is_empty() {
+            return None;
+        }
+        Some(FrameHint(format!("  {} · {}", s.model, s.effort.as_str())))
     }
 }
 impl rustyline::highlight::Highlighter for ReplHelper {
@@ -719,7 +718,6 @@ async fn main() -> Result<()> {
     rl.set_helper(Some(ReplHelper {
         session: Some(session.clone()),
         input_frame: false,
-        frame_width: 60,
     }));
     rl.bind_sequence(
         KeyEvent(KeyCode::BackTab, Modifiers::NONE),
@@ -735,13 +733,8 @@ async fn main() -> Result<()> {
     }
 
     loop {
-        let width = rl.dimensions().map(|(cols, _)| cols).unwrap_or(60).max(4);
-        // Leave the last terminal column unused: writing into it can wrap the
-        // frame onto a second line in Windows Terminal and other PTYs.
-        let width = ui::input_frame_width(ui::terminal_width(width));
         rl.helper_mut().unwrap().input_frame = true;
-        rl.helper_mut().unwrap().frame_width = width;
-        let prompt = ui::input_prompt(width);
+        let prompt = "❯ ";
         let input = rl.readline(&prompt);
         rl.helper_mut().unwrap().input_frame = false;
         match input {
