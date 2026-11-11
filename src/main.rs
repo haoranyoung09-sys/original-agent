@@ -269,7 +269,6 @@ impl ConditionalEventHandler for CycleEffortHandler {
 
 #[derive(Clone, Default)]
 struct ReplHelper {
-    session: Option<SharedSession>,
     input_frame: bool,
 }
 
@@ -277,49 +276,20 @@ impl rustyline::Helper for ReplHelper {}
 impl rustyline::completion::Completer for ReplHelper {
     type Candidate = rustyline::completion::Pair;
 }
-struct FrameHint(String);
-impl rustyline::hint::Hint for FrameHint {
-    fn display(&self) -> &str {
-        &self.0
-    }
-    fn completion(&self) -> Option<&str> {
+impl rustyline::hint::Hinter for ReplHelper {
+    type Hint = String;
+    fn hint(&self, _line: &str, _pos: usize, _ctx: &rustyline::Context<'_>) -> Option<String> {
         None
     }
 }
-impl rustyline::hint::Hinter for ReplHelper {
-    type Hint = FrameHint;
-    fn hint(&self, _line: &str, _pos: usize, _ctx: &rustyline::Context<'_>) -> Option<FrameHint> {
-        if !self.input_frame {
-            return None;
-        }
-        let s = self.session.as_ref()?.lock().ok()?;
-        if !_line.is_empty() {
-            return None;
-        }
-        Some(FrameHint(format!("  {} · {}", s.model, s.effort.as_str())))
-    }
-}
 impl rustyline::highlight::Highlighter for ReplHelper {
-    fn highlight_hint<'h>(&self, hint: &'h str) -> std::borrow::Cow<'h, str> {
-        if let Some(session) = &self.session {
-            if let Ok(s) = session.lock() {
-                return std::borrow::Cow::Owned(ui::color_input(hint, s.effort));
-            }
-        }
-        std::borrow::Cow::Borrowed(hint)
-    }
-
     fn highlight_prompt<'b, 's: 'b, 'p: 'b>(
         &'s self,
         prompt: &'p str,
         _default: bool,
     ) -> std::borrow::Cow<'b, str> {
         if self.input_frame {
-            if let Some(session) = &self.session {
-                if let Ok(s) = session.lock() {
-                    return std::borrow::Cow::Owned(ui::color_input(prompt, s.effort));
-                }
-            }
+            return std::borrow::Cow::Owned(ui::color_prompt(prompt));
         }
         std::borrow::Cow::Borrowed(prompt)
     }
@@ -701,10 +671,7 @@ async fn main() -> Result<()> {
 
     let mut rl = Editor::<ReplHelper, rustyline::history::DefaultHistory>::new()
         .context("初始化 REPL 失败")?;
-    rl.set_helper(Some(ReplHelper {
-        session: Some(session.clone()),
-        input_frame: false,
-    }));
+    rl.set_helper(Some(ReplHelper { input_frame: false }));
     rl.bind_sequence(
         KeyEvent(KeyCode::BackTab, Modifiers::NONE),
         EventHandler::Conditional(Box::new(CycleEffortHandler {

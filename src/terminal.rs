@@ -7,7 +7,8 @@ use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute, queue,
-    terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
+    style::{Color, Print, ResetColor, SetForegroundColor},
+    terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, SetTitle},
 };
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use std::{
@@ -22,12 +23,44 @@ const SIDEBAR_WIDTH: u16 = 28;
 const SIDEBAR_MIN_COLUMNS: u16 = 110;
 const SCROLL_STEP: usize = 10;
 
-struct Restore;
+const SIDEBAR_FG: Color = Color::AnsiValue(245);
+const SIDEBAR_RULE: Color = Color::AnsiValue(239);
+const SIDEBAR_TITLE: Color = Color::AnsiValue(189);
+
+struct Restore {
+    previous_title: String,
+}
 
 impl Drop for Restore {
     fn drop(&mut self) {
         let _ = terminal::disable_raw_mode();
-        let _ = execute!(std::io::stdout(), LeaveAlternateScreen, cursor::Show);
+        let mut stdout = std::io::stdout();
+        if !self.previous_title.is_empty() {
+            let _ = execute!(stdout, SetTitle(self.previous_title.as_str()));
+        }
+        let _ = execute!(stdout, LeaveAlternateScreen, cursor::Show);
+    }
+}
+
+fn current_title() -> String {
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::System::Console::GetConsoleTitleW;
+        let mut buf = [0u16; 256];
+        let n = GetConsoleTitleW(buf.as_mut_ptr(), buf.len() as u32);
+        if n > 0 {
+            return String::from_utf16_lossy(&buf[..n as usize]);
+        }
+    }
+    String::new()
+}
+
+fn sidebar_status_lines() -> Vec<String> {
+    match crate::config::Config::load() {
+        Ok(cfg) if !cfg.model.trim().is_empty() => {
+            vec![cfg.model.clone(), cfg.effort.as_str().to_string()]
+        }
+        _ => vec!["未登录".into()],
     }
 }
 
@@ -109,17 +142,22 @@ fn draw_sidebar(
     rows: u16,
     columns: u16,
     listing: &str,
+    status: &[String],
 ) -> Result<()> {
+    queue!(out, ResetColor)?;
     if columns < SIDEBAR_MIN_COLUMNS {
         return Ok(());
     }
     let text_width = SIDEBAR_WIDTH.saturating_sub(1) as usize;
-    let mut lines: Vec<String> = vec!["Sessions".into(), String::new()];
+    let mut lines: Vec<(Color, String)> = vec![(SIDEBAR_TITLE, "original".into())];
+    lines.extend(status.iter().map(|line| (SIDEBAR_FG, line.clone())));
+    lines.push((SIDEBAR_RULE, "─".repeat(text_width)));
+    lines.push((SIDEBAR_TITLE, "Sessions".into()));
     lines.extend(
         listing
             .lines()
-            .take(rows.saturating_sub(7) as usize)
-            .map(|line| line.to_string()),
+            .take(rows.saturating_sub(9) as usize)
+            .map(|line| (SIDEBAR_FG, line.to_string())),
     );
     let hints = [
         "/history: open archive",
@@ -128,15 +166,23 @@ fn draw_sidebar(
         "PgUp/PgDn: scroll",
     ];
     for y in 0..rows {
-        let text = if y + 4 >= rows {
-            hints[(y + 4 - rows) as usize].to_string()
+        let (color, text) = if y + 4 >= rows {
+            (SIDEBAR_RULE, hints[(y + 4 - rows) as usize].to_string())
         } else {
-            lines.get(y as usize).cloned().unwrap_or_default()
+            lines
+                .get(y as usize)
+                .cloned()
+                .unwrap_or((SIDEBAR_FG, String::new()))
         };
         queue!(
             out,
             cursor::MoveTo(width, y),
-            crossterm::style::Print(format!("│{}", fit(&text, text_width)))
+            ResetColor,
+            SetForegroundColor(SIDEBAR_RULE),
+            Print("│"),
+            SetForegroundColor(color),
+            Print(fit(&text, text_width)),
+            ResetColor
         )?;
     }
     Ok(())
@@ -173,12 +219,15 @@ pub fn run(root: &Path) -> Result<()> {
     });
     let mut parser = vt100::Parser::new(rows.max(1), width, 5000);
     terminal::enable_raw_mode()?;
-    let _restore = Restore;
+    let _restore = Restore {
+        previous_title: current_title(),
+    };
     execute!(
         std::io::stdout(),
         EnterAlternateScreen,
         Clear(ClearType::All),
-        cursor::Show
+        cursor::Show,
+        SetTitle("original")
     )?;
     let result = (|| -> Result<()> {
         let mut dirty = true;
@@ -193,13 +242,15 @@ pub fn run(root: &Path) -> Result<()> {
                 let (columns, rows) = terminal::size()?;
                 let mut out = std::io::stdout().lock();
                 out.write_all(&parser.screen().contents_formatted())?;
+                queue!(out, ResetColor, SetTitle("original"))?;
+                let status = sidebar_status_lines();
                 if refreshed.elapsed() >= Duration::from_secs(2) {
                     listing = crate::archive::command("/sessions", root)
                         .and_then(|r| r.ok())
                         .unwrap_or_default();
                     refreshed = std::time::Instant::now();
                 }
-                draw_sidebar(&mut out, width, rows, columns, &listing)?;
+                draw_sidebar(&mut out, width, rows, columns, &listing, &status)?;
                 let (row, col) = parser.screen().cursor_position();
                 queue!(out, cursor::MoveTo(col, row))?;
                 out.flush()?;
@@ -280,5 +331,14 @@ mod tests {
         assert_eq!(fit("abc", 5), "abc  ");
         assert_eq!(fit("会话记录AB", 6), "会话记");
         assert_eq!(fit("ok\u{07}!", 4), "ok! ");
+    }
+
+    #[test]
+    fn sidebar_keeps_effort_on_its_own_line() {
+        let status: Vec<String> = vec!["claude-sonnet-4-5-20250929".into(), "high".into()];
+        assert_eq!(fit(&status[0], 27).trim(), "claude-sonnet-4-5-20250929");
+        assert_eq!(fit(&status[1], 27).trim(), "high");
+        let squeezed = fit("claude-sonnet-4-5-20250929 · high", 27);
+        assert!(!squeezed.contains("high"), "{squeezed}");
     }
 }

@@ -6,7 +6,7 @@ Explore code, edit files, and run project tests from your terminal. Original is 
 
 ## Full-screen terminal
 
-Interactive startup uses a full-screen terminal host. A session index appears at 110 columns and hides on narrower terminals. Page Up / Page Down scroll through output. F10 exits. Use `original --classic` for the inline interface. Login, settings and command authorization retain their existing interactions. Open archives with `/history ID`. The embedded terminal's input prompt follows the conversation.
+Interactive startup uses a full-screen terminal host. A session index appears at 110 columns and hides on narrower terminals. Page Up / Page Down scroll through output. F10 exits. Use `original --classic` for the inline interface. Login, settings and command authorization retain their existing interactions. Open archives with `/history ID`. The embedded terminal's input prompt follows the conversation. The model name and thinking effort stay next to the startup icon and in the session sidebar, not beside the input prompt. The sidebar puts effort on its own line so a long model name cannot hide it. The sidebar uses a fixed gray style so prompt colors do not leak into it. The console window title is `original`.
 
 ## Install the v0.3.10 source tag
 
@@ -151,7 +151,7 @@ In an interactive session, verification runs when this turn recorded a file-tool
 
 Snapshots are in-memory and cover file tools only, not shell or external CLI changes. They are discarded on exit. Batch write failures trigger attempted restoration, not crash-proof transactions. Undo can partially fail on I/O errors. Without Git, automatic verification looks only at file-tool records.
 
-Archives live under `~/.original-agent/sessions/`. Use `--no-record` to disable this archive for a run; existing line-editing history is separate. Official CLI handoff does not archive. Completed turns and verification output (command, exit code, stdout, stderr, elapsed time) are recorded. Login forms are excluded and known keys are filtered, but arbitrary secrets or source code may remain. Archive viewing does not resume a model conversation or restore files. Retention and deletion are currently manual.
+Archives live under `~/.original-agent/sessions/`. After the first substantial user message, a short topic is stored in metadata and shown in `/history` and the session sidebar. Older archives without a saved topic fall back to the first user message. Use `--no-record` to disable this archive for a run; existing line-editing history is separate. Official CLI handoff does not archive. Completed turns and verification output (command, exit code, stdout, stderr, elapsed time) are recorded. Login forms are excluded and known keys are filtered, but arbitrary secrets or source code may remain. Archive viewing does not resume a model conversation or restore files. Retention and deletion are currently manual.
 
 ## Development and licensing
 

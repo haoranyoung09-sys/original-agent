@@ -194,21 +194,27 @@ pub fn print_status_line(session: &SessionState, cfg: &Config) {
     println!("{}", c(LABEL, &status_line(session, cfg)));
 }
 
-pub fn print_startup(cwd: &std::path::Path, session: &SessionState, cfg: &Config) {
-    let subtitle = if session.logged_in {
+pub fn startup_subtitle(session: &SessionState) -> String {
+    if session.logged_in {
+        let model = if session.model.is_empty() {
+            "model?"
+        } else {
+            session.model.as_str()
+        };
         format!(
-            "{} · {}",
+            "{} · {} · {}",
             session.api_style,
-            if session.model.is_empty() {
-                "model?"
-            } else {
-                &session.model
-            }
+            model,
+            session.effort.as_str()
         )
     } else {
         "终端 coding agent".to_string()
-    };
-    print_icon_and_title(&subtitle);
+    }
+}
+
+pub fn print_startup(cwd: &std::path::Path, session: &SessionState, cfg: &Config) {
+    set_window_title();
+    print_icon_and_title(&startup_subtitle(session));
     println!();
     print_status_line(session, cfg);
     println!("{}", c(LABEL, &format!("cwd {}", cwd.display())));
@@ -285,7 +291,7 @@ pub fn print_help_panel() {
 /model [name]     查看或切换模型
 /settings         查看设置、调整思考强度（也可用 /setting）
 /usage            当前会话 token 用量
-/history [ID]     列出项目归档或查看记录
+/history [ID]     列出项目归档（含自动主题）或查看记录
 /status           状态
 /clear            清空对话（用量保留）
 /help  /exit      帮助 / 退出
@@ -308,8 +314,12 @@ fn effort_color(effort: crate::session::EffortLevel) -> &'static str {
         crate::session::EffortLevel::Max => "31",
     }
 }
-pub fn color_input(text: &str, effort: crate::session::EffortLevel) -> String {
-    c(effort_color(effort), text)
+pub fn color_prompt(text: &str) -> String {
+    c(ACCENT, text)
+}
+
+pub fn set_window_title() {
+    let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::SetTitle("original"));
 }
 pub fn input_footer(model: &str, effort: crate::session::EffortLevel, width: usize) -> String {
     let name = if model.is_empty() { "未登录" } else { model };
@@ -380,6 +390,19 @@ mod input_tests {
             assert_eq!(footer.chars().count(), width);
             assert!(footer.contains("model · high"));
         }
+    }
+
+    #[test]
+    fn startup_subtitle_includes_model_and_effort() {
+        let cfg = Config::default();
+        let mut s = SessionState::from_config(&cfg, false);
+        assert_eq!(startup_subtitle(&s), "终端 coding agent");
+        s.logged_in = true;
+        s.model = "claude-sonnet-4-5-20250929".into();
+        s.effort = EffortLevel::High;
+        let text = startup_subtitle(&s);
+        assert!(text.contains("claude-sonnet-4-5-20250929"));
+        assert!(text.contains("high"));
     }
 
     #[test]
