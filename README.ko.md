@@ -1,6 +1,6 @@
 # original-agent
 
-[![Rust 1.100.0 stable](https://img.shields.io/badge/Rust-1.100.0%20stable-000000?logo=rust&logoColor=E57324)](https://github.com/haoranyoung09-sys/original-agent/blob/main/.github/workflows/ci.yml)
+[![Rust 1.100.0 stable](https://img.shields.io/badge/Rust-1.100.0%20stable-000000?logo=rust&logoColor=white)](https://github.com/haoranyoung09-sys/original-agent/blob/main/.github/workflows/ci.yml)
 [![CI](https://img.shields.io/github/actions/workflow/status/haoranyoung09-sys/original-agent/ci.yml?branch=main&label=CI)](https://github.com/haoranyoung09-sys/original-agent/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/haoranyoung09-sys/original-agent?label=release)](https://github.com/haoranyoung09-sys/original-agent/releases/latest)
 [![license](https://img.shields.io/github/license/haoranyoung09-sys/original-agent)](LICENSE)
@@ -26,7 +26,7 @@ Original은 Rust로 만든 터미널 코딩 에이전트입니다. 자연어로 
 
 ## 화면
 
-아래 두 그림과 짧은 녹화는 release 빌드 `original` 0.3.11을 실제로 실행한 데스크톱 스크린샷입니다. 개념도가 아니고, 터미널 출력을 다시 그린 그림도 아닙니다. 비어 있는 임시 홈과 임시 작업 디렉터리를 사용했고, 로그인과 API 키, 모델 호출은 없습니다. 그림의 `/tmp/original-readme-demo.*`는 그때 만든 빈 디렉터리입니다. 시작 직후 사이드바는 프로그램이 출력한 `No sessions`입니다. `/help` 뒤에는 아직 주제가 없는 로컬 기록 `未命名会话`이 보입니다.
+아래 두 그림과 짧은 녹화는 release 빌드 `original` 0.3.11을 실제로 실행한 데스크톱 스크린샷입니다. 왼쪽 위 보석은 프로그램이 직접 보내는 256색이며, 채워진 칸의 픽셀은 `#d7d7ff`, `#8787ff`, `#875fff`, `#5f5fff`입니다. 촬영할 때 비어 있지 않은 `NO_COLOR`를 뺐습니다. 이 변수가 있으면 색이 나가지 않아 터미널 기본 글자색으로 회백색이 됩니다. 개념도가 아니고, 터미널 출력을 다시 그린 그림도 아닙니다. 비어 있는 임시 홈과 임시 작업 디렉터리를 사용했고, 로그인과 API 키, 모델 호출은 없습니다. 그림의 `/tmp/original-readme-demo.*`는 그때 만든 빈 디렉터리입니다. 시작 직후 사이드바는 프로그램이 출력한 `No sessions`입니다. `/help` 뒤에는 아직 주제가 없는 로컬 기록 `未命名会话`이 보입니다.
 
 ![로그인하지 않은 전체 화면 시작. 버전 0.3.11, 오른쪽은 세션 색인](docs/assets/fullscreen-startup.png)
 

@@ -6,6 +6,9 @@
 # xdotool, and ffmpeg. The program is started with an empty temporary HOME
 # and an empty temporary working directory, so it does not read personal
 # config, API keys, or existing session archives, and it does not call a model.
+# NO_COLOR is removed for this process only. A non-empty NO_COLOR makes
+# original print the startup gem without its 256-color purple, and the
+# terminal then draws those blocks in the default text color.
 #
 # Usage, from the repository root:
 #   cargo build --locked --release
@@ -45,7 +48,7 @@ xfce4-terminal --disable-server \
   --title original-readme-demo \
   --color-bg '#1b1b1b' --color-text '#e6e6e6' \
   --working-directory "$demo_cwd" \
-  --command "env HOME=$demo_home $binary" \
+  --command "env -u NO_COLOR TERM=xterm-256color HOME=$demo_home $binary" \
   >/tmp/original-readme-demo-terminal.log 2>&1 &
 term_pid=$!
 

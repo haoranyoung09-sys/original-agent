@@ -1,6 +1,6 @@
 # original-agent
 
-[![Rust 1.100.0 stable](https://img.shields.io/badge/Rust-1.100.0%20stable-000000?logo=rust&logoColor=E57324)](https://github.com/haoranyoung09-sys/original-agent/blob/main/.github/workflows/ci.yml)
+[![Rust 1.100.0 stable](https://img.shields.io/badge/Rust-1.100.0%20stable-000000?logo=rust&logoColor=white)](https://github.com/haoranyoung09-sys/original-agent/blob/main/.github/workflows/ci.yml)
 [![CI](https://img.shields.io/github/actions/workflow/status/haoranyoung09-sys/original-agent/ci.yml?branch=main&label=CI)](https://github.com/haoranyoung09-sys/original-agent/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/haoranyoung09-sys/original-agent?label=release)](https://github.com/haoranyoung09-sys/original-agent/releases/latest)
 [![license](https://img.shields.io/github/license/haoranyoung09-sys/original-agent)](LICENSE)
@@ -26,7 +26,7 @@
 
 ## 界面
 
-下面两张图和短片是同一次真实运行的桌面截图，不是概念图，也不是把终端输出重新绘制成的图片。程序是 release 构建的 `original` 0.3.11。临时主目录和临时工作目录都是空的，没有登录、没有 API Key，也没有调用模型。画面中的 `/tmp/original-readme-demo.*` 是这次截图创建的空目录。启动瞬间侧栏原文是 `No sessions`；输入 `/help` 之后，侧栏显示还没有主题的本地归档 `未命名会话`。
+下面两张图和短片是同一次真实运行的桌面截图，不是概念图，也不是把终端输出重新绘制成的图片。左上角宝石是程序发出的 256 色；实心块像素为 `#d7d7ff`、`#8787ff`、`#875fff`、`#5f5fff`。捕获时去掉了非空的 `NO_COLOR`，否则这些颜色不会发出，终端会用默认文字色把宝石画成灰白。程序是 release 构建的 `original` 0.3.11。临时主目录和临时工作目录都是空的，没有登录、没有 API Key，也没有调用模型。画面中的 `/tmp/original-readme-demo.*` 是这次截图创建的空目录。启动瞬间侧栏原文是 `No sessions`；输入 `/help` 之后，侧栏显示还没有主题的本地归档 `未命名会话`。
 
 ![未登录时的全屏启动画面，标题旁是版本 0.3.11，右侧是会话索引](docs/assets/fullscreen-startup.png)
 

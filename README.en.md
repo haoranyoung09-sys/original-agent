@@ -1,6 +1,6 @@
 # original-agent
 
-[![Rust 1.100.0 stable](https://img.shields.io/badge/Rust-1.100.0%20stable-000000?logo=rust&logoColor=E57324)](https://github.com/haoranyoung09-sys/original-agent/blob/main/.github/workflows/ci.yml)
+[![Rust 1.100.0 stable](https://img.shields.io/badge/Rust-1.100.0%20stable-000000?logo=rust&logoColor=white)](https://github.com/haoranyoung09-sys/original-agent/blob/main/.github/workflows/ci.yml)
 [![CI](https://img.shields.io/github/actions/workflow/status/haoranyoung09-sys/original-agent/ci.yml?branch=main&label=CI)](https://github.com/haoranyoung09-sys/original-agent/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/haoranyoung09-sys/original-agent?label=release)](https://github.com/haoranyoung09-sys/original-agent/releases/latest)
 [![license](https://img.shields.io/github/license/haoranyoung09-sys/original-agent)](LICENSE)
@@ -26,7 +26,7 @@ The four badges read this repository. They do not claim downloads or coverage:
 
 ## Interface
 
-These pictures and the short recording are desktop screenshots of one real run of the release binary `original` 0.3.11. They are not mockups and not a redraw of terminal text. The capture used an empty temporary home and an empty temporary working directory. There was no login, no API key, and no model call. The `/tmp/original-readme-demo.*` path in the picture is that empty directory. The first sidebar text is the program's own `No sessions`. After `/help`, the sidebar shows the not-yet-named local archive `未命名会话`.
+These pictures and the short recording are desktop screenshots of one real run of the release binary `original` 0.3.11. The top-left gem is the program's own 256-color output; the solid blocks measure `#d7d7ff`, `#8787ff`, `#875fff`, and `#5f5fff`. The capture unsets a non-empty `NO_COLOR`. With that variable set, original does not emit these colors and the terminal draws the gem in the default text color. They are not mockups and not a redraw of terminal text. The capture used an empty temporary home and an empty temporary working directory. There was no login, no API key, and no model call. The `/tmp/original-readme-demo.*` path in the picture is that empty directory. The first sidebar text is the program's own `No sessions`. After `/help`, the sidebar shows the not-yet-named local archive `未命名会话`.
 
 ![Full-screen startup while logged out, version 0.3.11, with the session index on the right](docs/assets/fullscreen-startup.png)
 

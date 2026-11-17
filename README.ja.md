@@ -1,6 +1,6 @@
 # original-agent
 
-[![Rust 1.100.0 stable](https://img.shields.io/badge/Rust-1.100.0%20stable-000000?logo=rust&logoColor=E57324)](https://github.com/haoranyoung09-sys/original-agent/blob/main/.github/workflows/ci.yml)
+[![Rust 1.100.0 stable](https://img.shields.io/badge/Rust-1.100.0%20stable-000000?logo=rust&logoColor=white)](https://github.com/haoranyoung09-sys/original-agent/blob/main/.github/workflows/ci.yml)
 [![CI](https://img.shields.io/github/actions/workflow/status/haoranyoung09-sys/original-agent/ci.yml?branch=main&label=CI)](https://github.com/haoranyoung09-sys/original-agent/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/haoranyoung09-sys/original-agent?label=release)](https://github.com/haoranyoung09-sys/original-agent/releases/latest)
 [![license](https://img.shields.io/github/license/haoranyoung09-sys/original-agent)](LICENSE)
@@ -26,7 +26,7 @@ Original は Rust 製のターミナル向けコーディングエージェン�
 
 ## 画面
 
-次の 2 枚と短い録画は、release ビルドの `original` 0.3.11 を実際に動かしたデスクトップのスクリーンショットです。概念図でも、端末出力を描き直した図でもありません。空の一時ホームと空の一時作業ディレクトリを使い、ログインも API キーもモデル呼び出しもありません。画像内の `/tmp/original-readme-demo.*` はその空ディレクトリです。起動直後のサイドバーはプログラム自身の文言 `No sessions` です。`/help` のあと、まだ主題の無いローカル記録 `未命名会话` が表示されます。
+次の 2 枚と短い録画は、release ビルドの `original` 0.3.11 を実際に動かしたデスクトップのスクリーンショットです。左上の宝石はプログラム自身が送る 256 色で、塗りつぶし部分の画素は `#d7d7ff`、`#8787ff`、`#875fff`、`#5f5fff` です。撮影時は空でない `NO_COLOR` を外しています。この変数があると色が送られず、端末は既定の文字色で灰白に描きます。概念図でも、端末出力を描き直した図でもありません。空の一時ホームと空の一時作業ディレクトリを使い、ログインも API キーもモデル呼び出しもありません。画像内の `/tmp/original-readme-demo.*` はその空ディレクトリです。起動直後のサイドバーはプログラム自身の文言 `No sessions` です。`/help` のあと、まだ主題の無いローカル記録 `未命名会话` が表示されます。
 
 ![未ログインの全画面起動。版は 0.3.11、右側がセッション索引](docs/assets/fullscreen-startup.png)
 
