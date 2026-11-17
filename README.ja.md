@@ -1,10 +1,38 @@
 # original-agent
 
+[![Rust 1.100.0 stable](https://img.shields.io/badge/Rust-1.100.0%20stable-000000?logo=rust&logoColor=E57324)](https://github.com/haoranyoung09-sys/original-agent/blob/main/.github/workflows/ci.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/haoranyoung09-sys/original-agent/ci.yml?branch=main&label=CI)](https://github.com/haoranyoung09-sys/original-agent/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/haoranyoung09-sys/original-agent?label=release)](https://github.com/haoranyoung09-sys/original-agent/releases/latest)
+[![license](https://img.shields.io/github/license/haoranyoung09-sys/original-agent)](LICENSE)
+
 [简体中文](README.md) · [English](README.en.md) · **日本語** · [한국어](README.ko.md)
 
 Original は Rust 製のターミナル向けコーディングエージェントです。自然言語でコードを検索し、ファイルを編集し、プロジェクトのテストを実行できます。ファイルツールの変更をプロセス内で取り消し、セッションをローカルに保存します。画面の考え方は [Pi](https://github.com/badlogic/pi-mono) を参考にしています。Pi、Anthropic、OpenAI、Google の公式製品ではありません。
 
 このソースのパッケージ版は `0.3.11` です。`original --version`、`Cargo.toml`、タグ `v0.3.11` は同じ番号です。古いタグ `v0.3.10` のパッケージ版は `0.3.9` のままで、リリースワークフローはタグとパッケージ版の一致を要求するため、`v0.3.10` にはプリビルドの添付がありません。
+
+バッジはすべてこのリポジトリの実データです。ダウンロード数やカバレッジは表示しません。
+
+- **Rust 1.100.0 stable** は Rust のロゴとツールチェーンの文字です。`Cargo.toml` に `rust-version` は無く、MSRV も宣言していません。`1.100.0` は 2026-11-12 に `rustup` が解決した stable です。CI と Release は浮動チャンネル `dtolnay/rust-toolchain@stable` を入れます。これは最低対応バージョンではありません。
+- **CI** は `main` の [`.github/workflows/ci.yml`](.github/workflows/ci.yml) の最新結果です。
+- **release** は GitHub 上の最新 Release です。この文書の作成時点では `v0.3.9` です。パッケージ `0.3.11` の添付は、そのタグの Release ワークフローがアップロードに成功してからこのバッジに出ます。
+- **license** はリポジトリのライセンスで、現在は [MIT](LICENSE) です。
+
+## 最初に見ること
+
+1. [インストール](#インストールと更新)。Rust が無いときはインストールスクリプト、この版のソースは `cargo install --locked --tag v0.3.11` です。
+2. `original` を起動して `/login` を入力します。ログイン前はモデルを呼び出せません。
+3. 対話端末は全画面で始まります。`original --classic` は行単位の画面です。
+
+## 画面
+
+次の 2 枚と短い録画は、release ビルドの `original` 0.3.11 を実際に動かしたデスクトップのスクリーンショットです。概念図でも、端末出力を描き直した図でもありません。空の一時ホームと空の一時作業ディレクトリを使い、ログインも API キーもモデル呼び出しもありません。画像内の `/tmp/original-readme-demo.*` はその空ディレクトリです。起動直後のサイドバーはプログラム自身の文言 `No sessions` です。`/help` のあと、まだ主題の無いローカル記録 `未命名会话` が表示されます。
+
+![未ログインの全画面起動。版は 0.3.11、右側がセッション索引](docs/assets/fullscreen-startup.png)
+
+![同じウィンドウで /help を入力したあとの実際のヘルプ](docs/assets/fullscreen-help.png)
+
+同じ操作の 7 秒間の画面録画です: [fullscreen-help.mp4](docs/assets/fullscreen-help.mp4)。再現手順は [docs/assets/capture-readme-demo.sh](docs/assets/capture-readme-demo.sh) です。`cargo build --locked --release` のあと、ディスプレイ、xfce4-terminal、xdotool、ffmpeg がある環境で実行します。
 
 ## 全画面ターミナル
 

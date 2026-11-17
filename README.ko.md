@@ -1,10 +1,38 @@
 # original-agent
 
+[![Rust 1.100.0 stable](https://img.shields.io/badge/Rust-1.100.0%20stable-000000?logo=rust&logoColor=E57324)](https://github.com/haoranyoung09-sys/original-agent/blob/main/.github/workflows/ci.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/haoranyoung09-sys/original-agent/ci.yml?branch=main&label=CI)](https://github.com/haoranyoung09-sys/original-agent/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/haoranyoung09-sys/original-agent?label=release)](https://github.com/haoranyoung09-sys/original-agent/releases/latest)
+[![license](https://img.shields.io/github/license/haoranyoung09-sys/original-agent)](LICENSE)
+
 [简体中文](README.md) · [English](README.en.md) · [日本語](README.ja.md) · **한국어**
 
 Original은 Rust로 만든 터미널 코딩 에이전트입니다. 자연어로 코드를 찾고 파일을 수정한 뒤 프로젝트 테스트를 실행할 수 있습니다. 파일 도구가 바꾼 내용은 프로세스 안에서 되돌릴 수 있고, 세션은 로컬에 저장합니다. 상호작용은 [Pi](https://github.com/badlogic/pi-mono)를 참고했습니다. Pi, Anthropic, OpenAI, Google의 공식 제품이 아닙니다.
 
 이 소스의 패키지 버전은 `0.3.11`입니다. `original --version`, `Cargo.toml`, 태그 `v0.3.11`이 같은 번호입니다. 이전 태그 `v0.3.10`의 패키지 버전은 여전히 `0.3.9`입니다. 릴리스 워크플로는 태그와 패키지 버전이 같아야 하므로 `v0.3.10`에는 미리 빌드한 첨부 파일이 없습니다.
+
+배지 네 개는 이 저장소의 실제 데이터입니다. 다운로드 수나 커버리지는 넣지 않습니다.
+
+- **Rust 1.100.0 stable**는 Rust 로고와 툴체인 문자입니다. `Cargo.toml`에 `rust-version`이 없고 MSRV도 선언하지 않았습니다. `1.100.0`은 2026-11-12에 `rustup`이 해석한 stable입니다. CI와 Release 워크플로는 유동 채널 `dtolnay/rust-toolchain@stable`을 설치하며, 이것은 최소 지원 버전이 아닙니다.
+- **CI**는 `main`의 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) 최근 결과입니다.
+- **release**는 GitHub의 최신 Release입니다. 이 문서를 쓸 때는 `v0.3.9`였습니다. 패키지 `0.3.11` 첨부는 해당 태그의 Release 워크플로가 업로드에 성공한 뒤에야 이 배지에 나타납니다.
+- **license**는 저장소 라이선스이며 현재 [MIT](LICENSE)입니다.
+
+## 먼저 볼 곳
+
+1. [설치](#설치와-업데이트). Rust가 없으면 설치 스크립트를 쓰고, 이 버전 소스는 `cargo install --locked --tag v0.3.11`로 설치합니다.
+2. `original`을 실행한 뒤 `/login`을 입력합니다. 로그인 전에는 모델을 호출할 수 없습니다.
+3. 대화형 터미널은 전체 화면으로 시작합니다. `original --classic`은 줄 단위 화면입니다.
+
+## 화면
+
+아래 두 그림과 짧은 녹화는 release 빌드 `original` 0.3.11을 실제로 실행한 데스크톱 스크린샷입니다. 개념도가 아니고, 터미널 출력을 다시 그린 그림도 아닙니다. 비어 있는 임시 홈과 임시 작업 디렉터리를 사용했고, 로그인과 API 키, 모델 호출은 없습니다. 그림의 `/tmp/original-readme-demo.*`는 그때 만든 빈 디렉터리입니다. 시작 직후 사이드바는 프로그램이 출력한 `No sessions`입니다. `/help` 뒤에는 아직 주제가 없는 로컬 기록 `未命名会话`이 보입니다.
+
+![로그인하지 않은 전체 화면 시작. 버전 0.3.11, 오른쪽은 세션 색인](docs/assets/fullscreen-startup.png)
+
+![같은 창에서 /help를 입력한 뒤의 실제 도움말](docs/assets/fullscreen-help.png)
+
+같은 키 입력의 7초 화면 녹화: [fullscreen-help.mp4](docs/assets/fullscreen-help.mp4). 재현 방법은 [docs/assets/capture-readme-demo.sh](docs/assets/capture-readme-demo.sh)입니다. `cargo build --locked --release` 이후 디스플레이, xfce4-terminal, xdotool, ffmpeg가 있는 환경에서 실행합니다.
 
 ## 전체 화면 터미널
 

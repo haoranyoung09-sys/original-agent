@@ -1,10 +1,38 @@
 # original-agent
 
+[![Rust 1.100.0 stable](https://img.shields.io/badge/Rust-1.100.0%20stable-000000?logo=rust&logoColor=E57324)](https://github.com/haoranyoung09-sys/original-agent/blob/main/.github/workflows/ci.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/haoranyoung09-sys/original-agent/ci.yml?branch=main&label=CI)](https://github.com/haoranyoung09-sys/original-agent/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/haoranyoung09-sys/original-agent?label=release)](https://github.com/haoranyoung09-sys/original-agent/releases/latest)
+[![license](https://img.shields.io/github/license/haoranyoung09-sys/original-agent)](LICENSE)
+
 **简体中文** · [English](README.en.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
 在终端里用自然语言查代码、改文件、运行项目测试。Original 以 Rust 构建，支持 Anthropic 和 OpenAI 兼容 API，内置改动回退和本地会话归档。交互设计参考 [Pi](https://github.com/badlogic/pi-mono)。
 
 当前源码的包版本是 `0.3.11`。`original --version`、`Cargo.toml` 与标签 `v0.3.11` 使用同一个版本号。更早的标签 `v0.3.10` 仍指向包版本 `0.3.9`，发布流程要求两者一致，所以该标签没有预编译附件。
+
+四枚徽章都指向本仓库的真实数据，没有下载量或覆盖率：
+
+- **Rust 1.100.0 stable** 使用 Rust 标志，文字是工具链版本。`Cargo.toml` 没有 `rust-version`，仓库也没有声明 MSRV。`1.100.0` 是 2026-11-12 由 `rustup` 解析到的 stable；CI 与 Release 工作流安装的是浮动通道 `dtolnay/rust-toolchain@stable`，不是最低支持版本。
+- **CI** 读取 `main` 分支上 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) 最近一次的实际结果。
+- **release** 读取 GitHub 最新已发布的 Release。编写本文时是 `v0.3.9`。源码包版本 `0.3.11` 的附件要等对应标签的 Release 工作流上传成功后，才会变成这个徽章显示的版本。
+- **license** 读取仓库许可证，当前是 [MIT](LICENSE)。
+
+## 先看这里
+
+1. [安装](#安装)。没有 Rust 时运行安装脚本；安装这一版源码用 `cargo install --locked --tag v0.3.11`。
+2. 运行 `original`，再输入 `/login`。没有登录时不能调用模型。
+3. 交互终端默认进入全屏。`original --classic` 使用行式界面。
+
+## 界面
+
+下面两张图和短片是同一次真实运行的桌面截图，不是概念图，也不是把终端输出重新绘制成的图片。程序是 release 构建的 `original` 0.3.11。临时主目录和临时工作目录都是空的，没有登录、没有 API Key，也没有调用模型。画面中的 `/tmp/original-readme-demo.*` 是这次截图创建的空目录。启动瞬间侧栏原文是 `No sessions`；输入 `/help` 之后，侧栏显示还没有主题的本地归档 `未命名会话`。
+
+![未登录时的全屏启动画面，标题旁是版本 0.3.11，右侧是会话索引](docs/assets/fullscreen-startup.png)
+
+![同一窗口输入 /help 之后的真实帮助面板](docs/assets/fullscreen-help.png)
+
+同一轮按键的 7 秒屏幕录像：[fullscreen-help.mp4](docs/assets/fullscreen-help.mp4)。重现命令是 [docs/assets/capture-readme-demo.sh](docs/assets/capture-readme-demo.sh)。需要已经执行 `cargo build --locked --release`，以及显示器、xfce4-terminal、xdotool 和 ffmpeg。
 
 ## 全屏终端
 

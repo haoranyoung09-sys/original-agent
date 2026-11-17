@@ -1,10 +1,38 @@
 # original-agent
 
+[![Rust 1.100.0 stable](https://img.shields.io/badge/Rust-1.100.0%20stable-000000?logo=rust&logoColor=E57324)](https://github.com/haoranyoung09-sys/original-agent/blob/main/.github/workflows/ci.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/haoranyoung09-sys/original-agent/ci.yml?branch=main&label=CI)](https://github.com/haoranyoung09-sys/original-agent/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/haoranyoung09-sys/original-agent?label=release)](https://github.com/haoranyoung09-sys/original-agent/releases/latest)
+[![license](https://img.shields.io/github/license/haoranyoung09-sys/original-agent)](LICENSE)
+
 [简体中文](README.md) · **English** · [日本語](README.ja.md) · [한국어](README.ko.md)
 
 Explore code, edit files, and run project tests from the terminal. Original is a Rust coding agent with Anthropic and OpenAI-compatible backends, in-process file undo, and local session archives. The interaction draws on [Pi](https://github.com/badlogic/pi-mono).
 
 This source is package version `0.3.11`. `original --version`, `Cargo.toml`, and tag `v0.3.11` use that same number. The older tag `v0.3.10` still points at package `0.3.9`. The release workflow requires the tag and package version to match, so `v0.3.10` has no prebuilt assets.
+
+The four badges read this repository. They do not claim downloads or coverage:
+
+- **Rust 1.100.0 stable** is the Rust logo plus the toolchain text. `Cargo.toml` has no `rust-version`, and the repository declares no MSRV. `1.100.0` is the stable toolchain `rustup` resolved on 2026-11-12. CI and the release workflow install the floating channel `dtolnay/rust-toolchain@stable`; that channel is not a minimum supported version.
+- **CI** is the latest result of [`.github/workflows/ci.yml`](.github/workflows/ci.yml) on `main`.
+- **release** is the newest GitHub Release. When this page was written, that release was `v0.3.9`. Assets for package `0.3.11` appear in the badge only after that tag's release workflow uploads them.
+- **license** is the repository license, currently [MIT](LICENSE).
+
+## Start here
+
+1. [Install](#installation). Use the installer when Rust is not available, or `cargo install --locked --tag v0.3.11` for this source.
+2. Run `original`, then `/login`. The program cannot call a model before login.
+3. An interactive terminal starts full screen. `original --classic` uses the line interface.
+
+## Interface
+
+These pictures and the short recording are desktop screenshots of one real run of the release binary `original` 0.3.11. They are not mockups and not a redraw of terminal text. The capture used an empty temporary home and an empty temporary working directory. There was no login, no API key, and no model call. The `/tmp/original-readme-demo.*` path in the picture is that empty directory. The first sidebar text is the program's own `No sessions`. After `/help`, the sidebar shows the not-yet-named local archive `未命名会话`.
+
+![Full-screen startup while logged out, version 0.3.11, with the session index on the right](docs/assets/fullscreen-startup.png)
+
+![The same window after typing /help](docs/assets/fullscreen-help.png)
+
+Seven-second screen recording of the same keystrokes: [fullscreen-help.mp4](docs/assets/fullscreen-help.mp4). Reproduce it with [docs/assets/capture-readme-demo.sh](docs/assets/capture-readme-demo.sh) after `cargo build --locked --release`, on a machine with a display, xfce4-terminal, xdotool, and ffmpeg.
 
 ## Full-screen terminal
 
