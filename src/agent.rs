@@ -26,6 +26,42 @@ pub struct OriginalAgent {
     runtime: Arc<Mutex<AgentRuntime>>,
 }
 
+/// Shared system prompt used by both Anthropic and OpenAI-compatible backends.
+pub fn system_prompt_text(cwd: &std::path::Path) -> String {
+    let shell = if cfg!(windows) {
+        "Windows PowerShell（bash/verify 通过 powershell -Command；默认禁用，需 --allow-shell）"
+    } else {
+        "POSIX sh（bash/verify 通过 sh -c；默认禁用，需 --allow-shell）"
+    };
+    format!(
+        r#"你是 original，一个运行在本地工作区中的终端 vibe-coding agent（风格类似 Pi）。
+
+工作区根目录: {cwd}
+Shell: {shell}
+
+工具（优先用工具，不要空谈或编造文件内容）:
+- project_overview: 先摸清项目类型与目录树
+- glob / grep: 无 shell 的文件发现与内容搜索
+- read: 改动前先读
+- edit: 单处唯一字符串替换
+- multi_edit: 跨文件/多处协调修改（先全部校验再写入）
+- write: 新建或整文件覆盖
+- verify: 改后跑测试/构建反馈（需 --allow-shell；否则会给出建议命令）
+- bash: 任意命令（需 --allow-shell）
+
+Vibe coding 工作流:
+1. 陌生仓库先 project_overview 或 glob，再用 grep/read 定位。
+2. 小改动用 edit；同一意图涉及多处/多文件时用 multi_edit。
+3. 路径一律相对工作区；禁止逃逸工作区。
+4. Shell 默认关闭：不要假设能跑 bash/verify；没有权限时说明并给出建议命令。
+5. {response_style}
+"#,
+        cwd = cwd.display(),
+        shell = shell,
+        response_style = crate::ui::RESPONSE_STYLE,
+    )
+}
+
 impl OriginalAgent {
     pub fn new(
         root_std: PathBuf,
@@ -61,38 +97,7 @@ impl OriginalAgent {
     }
 
     fn system_prompt_text(&self) -> String {
-        let shell = if cfg!(windows) {
-            "Windows PowerShell（bash/verify 通过 powershell -Command；默认禁用，需 --allow-shell）"
-        } else {
-            "POSIX sh（bash/verify 通过 sh -c；默认禁用，需 --allow-shell）"
-        };
-        format!(
-            r#"你是 original，一个运行在本地工作区中的终端 vibe-coding agent（风格类似 Pi）。
-
-工作区根目录: {cwd}
-Shell: {shell}
-
-工具（优先用工具，不要空谈或编造文件内容）:
-- project_overview: 先摸清项目类型与目录树
-- glob / grep: 无 shell 的文件发现与内容搜索
-- read: 改动前先读
-- edit: 单处唯一字符串替换
-- multi_edit: 跨文件/多处协调修改（先全部校验再写入）
-- write: 新建或整文件覆盖
-- verify: 改后跑测试/构建反馈（需 --allow-shell；否则会给出建议命令）
-- bash: 任意命令（需 --allow-shell）
-
-Vibe coding 工作流:
-1. 陌生仓库先 project_overview 或 glob，再用 grep/read 定位。
-2. 小改动用 edit；同一意图涉及多处/多文件时用 multi_edit。
-3. 路径一律相对工作区；禁止逃逸工作区。
-4. Shell 默认关闭：不要假设能跑 bash/verify；没有权限时说明并给出建议命令。
-5. {response_style}
-"#,
-            cwd = self.root_std.display(),
-            shell = shell,
-            response_style = crate::ui::RESPONSE_STYLE,
-        )
+        system_prompt_text(&self.root_std)
     }
 }
 
@@ -145,7 +150,7 @@ impl Agent for OriginalAgent {
     }
 
     async fn bash(&self, command: &str, _restart: bool) -> Result<String, std::io::Error> {
-        let (code, stdout, stderr) = crate::shell::execute_shell(command, &self.root_std, 60);
+        let (code, stdout, stderr) = crate::shell::execute_shell(command, &self.root_std, 600);
         let mut out = format!("exit_code: {code}\n");
         if !stdout.is_empty() {
             out.push_str("stdout:\n");

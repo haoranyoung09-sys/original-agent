@@ -53,7 +53,7 @@ curl -fsSL https://raw.githubusercontent.com/haoranyoung09-sys/original-agent/ma
 
 ## 最初のセッション
 
-プロジェクトのディレクトリで `original` を起動し、`/login` を入力します。矢印キーと Enter で API 接続またはサブスクリプションを選べます。API 接続では Anthropic、OpenAI、DeepSeek または互換サービスを選び、API キーを入力します。モデルはログイン後に `/model <name>` で変更できます。
+プロジェクトのディレクトリで `original` を起動し、`/login` を入力します。矢印キーと Enter で API 接続またはサブスクリプションを選べます。API 接続では Anthropic、OpenAI、DeepSeek（Anthropic / OpenAI 互換）、またはカスタム互換サービス（Anthropic / OpenAI 互換）を選び、API キーを入力します（入力中は `*` でマスクされます）。モデルはログイン後に `/model <name>` で変更できます。`--cwd` を省略した場合、フルスクリーン／クラシックのどちらのモードでも最も近い `.git` ルートを自動検出します。
 
 サブスクリプションを選ぶと、インストール済みの Codex、Claude Code または Gemini CLI が起動します。認証と利用枠は各クライアントが管理します。
 
@@ -69,6 +69,6 @@ curl -fsSL https://raw.githubusercontent.com/haoranyoung09-sys/original-agent/ma
 
 ## 構成
 
-Rust の本体は Anthropic 互換 API にコミュニティ SDK の claudius を、OpenAI 互換 API に reqwest を使用します。Word・PowerPoint の読み書きには Python、画像の文字認識には Tesseract が必要です。
+Rust の本体は Anthropic 互換 API にコミュニティ SDK の claudius を、OpenAI 互換 API に reqwest（SSE ストリーミング、`429`/`5xx` リトライ、コンテキストウィンドウ圧縮対応）を使用します。Word・PowerPoint の読み書きには Python、画像の文字認識には Tesseract が必要です。
 
 [Office / OCR](docs/archive/office-tools.md) · [Security](SECURITY.md) · [MIT License](LICENSE)

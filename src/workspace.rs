@@ -49,6 +49,17 @@ pub fn resolve_in_workspace(root: &Path, user_path: &str) -> Result<PathBuf> {
     Ok(resolved)
 }
 
+/// Walk up from `start` to find the nearest ancestor containing `.git`, or return `start`.
+pub fn discover_git_root(start: &Path) -> PathBuf {
+    let canon = std::fs::canonicalize(start).unwrap_or_else(|_| start.to_path_buf());
+    for ancestor in canon.ancestors() {
+        if ancestor.join(".git").exists() {
+            return ancestor.to_path_buf();
+        }
+    }
+    canon
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -75,5 +86,16 @@ mod tests {
         let p = resolve_in_workspace(&dir, "a.txt").expect("ok");
         assert!(p.starts_with(std::fs::canonicalize(&dir).unwrap()));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn discovers_nearest_git_root() {
+        let base = std::env::temp_dir().join(format!("orig-git-root-{}", std::process::id()));
+        let nested = base.join("a").join("b");
+        let _ = fs::create_dir_all(base.join(".git"));
+        let _ = fs::create_dir_all(&nested);
+        let found = discover_git_root(&nested);
+        assert_eq!(found, std::fs::canonicalize(&base).unwrap());
+        let _ = fs::remove_dir_all(&base);
     }
 }

@@ -64,6 +64,32 @@ fn sidebar_status_lines() -> Vec<String> {
     }
 }
 
+struct CachedSidebarStatus {
+    last_mtime: Option<std::time::SystemTime>,
+    lines: Vec<String>,
+}
+
+impl CachedSidebarStatus {
+    fn new() -> Self {
+        Self {
+            last_mtime: None,
+            lines: sidebar_status_lines(),
+        }
+    }
+
+    fn get(&mut self) -> &[String] {
+        let mtime = crate::config::Config::config_path()
+            .ok()
+            .and_then(|p| std::fs::metadata(p).ok())
+            .and_then(|m| m.modified().ok());
+        if mtime != self.last_mtime {
+            self.last_mtime = mtime;
+            self.lines = sidebar_status_lines();
+        }
+        &self.lines
+    }
+}
+
 fn layout(columns: u16) -> u16 {
     if columns >= SIDEBAR_MIN_COLUMNS {
         columns.saturating_sub(SIDEBAR_WIDTH).max(1)
@@ -94,22 +120,10 @@ fn fit(text: &str, width: usize) -> String {
 }
 
 fn forwarded_args() -> Vec<OsString> {
-    let mut out = Vec::new();
-    let mut args = std::env::args_os().skip(1).peekable();
-    while let Some(arg) = args.next() {
-        if arg == "--classic" {
-            continue;
-        }
-        if arg == "--cwd" {
-            let _ = args.next();
-            continue;
-        }
-        if arg.to_string_lossy().starts_with("--cwd=") {
-            continue;
-        }
-        out.push(arg);
-    }
-    out
+    std::env::args_os()
+        .skip(1)
+        .filter(|arg| arg != "--classic")
+        .collect()
 }
 
 fn key_bytes(key: event::KeyEvent) -> Option<String> {
@@ -201,8 +215,6 @@ pub fn run(root: &Path) -> Result<()> {
     command.env("ORIGINAL_AGENT_HOST", "1");
     command.cwd(root);
     command.arg("--classic");
-    command.arg("--cwd");
-    command.arg(root);
     command.args(forwarded_args());
     let mut child = pair.slave.spawn_command(command)?;
     drop(pair.slave);
@@ -232,6 +244,7 @@ pub fn run(root: &Path) -> Result<()> {
     let result = (|| -> Result<()> {
         let mut dirty = true;
         let mut listing = String::new();
+        let mut status_cache = CachedSidebarStatus::new();
         let mut refreshed = std::time::Instant::now() - Duration::from_secs(3);
         loop {
             while let Ok(data) = receive.try_recv() {
@@ -243,14 +256,14 @@ pub fn run(root: &Path) -> Result<()> {
                 let mut out = std::io::stdout().lock();
                 out.write_all(&parser.screen().contents_formatted())?;
                 queue!(out, ResetColor, SetTitle("original"))?;
-                let status = sidebar_status_lines();
+                let status = status_cache.get();
                 if refreshed.elapsed() >= Duration::from_secs(2) {
                     listing = crate::archive::command("/sessions", root)
                         .and_then(|r| r.ok())
                         .unwrap_or_default();
                     refreshed = std::time::Instant::now();
                 }
-                draw_sidebar(&mut out, width, rows, columns, &listing, &status)?;
+                draw_sidebar(&mut out, width, rows, columns, &listing, status)?;
                 let (row, col) = parser.screen().cursor_position();
                 queue!(out, cursor::MoveTo(col, row))?;
                 out.flush()?;

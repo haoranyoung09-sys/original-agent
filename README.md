@@ -24,7 +24,7 @@ original --version
 - **运行时**：Tokio 异步运行时；Clap 解析启动参数；Rustyline 管理终端输入和快捷键。
 - **Anthropic 协议**：使用社区 Rust SDK [claudius](https://github.com/rescrv/claudius)，本仓库内置版本为 0.33.0，位于 [vendor/claudius](vendor/claudius)。这是社区 SDK，**不是 Anthropic 官方 Rust SDK**。
 - **SDK 本地修改**：保留 Windows 编译适配，自定义工具按不含服务端 `type` 标签的 schema 序列化，以兼容已遇到的 DeepSeek 请求问题。
-- **OpenAI 兼容协议**：由 reqwest + Serde 实现 Chat Completions 与工具循环，不依赖官方 OpenAI Rust SDK；目前不提供 Responses API 后端。
+- **OpenAI 兼容协议**：由 reqwest + Serde 实现 Chat Completions 与工具循环，支持 SSE 流式输出（`stream: true`，服务端返回 JSON 时自动回退）、`429`/`5xx` 指数退避重试、上下文窗口自动裁剪，以及对畸形工具参数 JSON 的显式报错纠正；不依赖官方 OpenAI Rust SDK；目前不提供 Responses API 后端。
 - **共享编码工具**：文件读写、唯一文本编辑、批量编辑、glob、字面 grep、项目概览和验证；并提供当前进程快照、回退及本地会话归档。
 
 ```mermaid
@@ -64,7 +64,7 @@ flowchart TD
 
 ## 登录方式速查
 
-**API 模式**：运行 `original`，输入 `/login`，先选「API」。再选 Anthropic、OpenAI、DeepSeek 或自定义服务，然后填写 API Key。菜单需要交互终端。内置三项使用预设 URL 和默认模型，并写入该预设的上下文与输入/输出单价（与对照表中这些默认模型一致；缓存读取单价仅在对照表命中时写入）。DeepSeek 这一项是 OpenAI 兼容预设。自定义服务要填写服务地址，模型名为 `my-model`，上下文 128000，没有单价；接 Grok 官方 API 时地址填 `https://api.x.ai/v1`，再用 `/model` 改成账号里的模型。API Key 留空则保留原密钥；base URL 变化时会先清掉已保存的密钥。换模型用 `/model <name>`。配置位于 `~/.original-agent/config.json`，密钥是本地明文。环境变量可覆盖密钥，按 `ORIGINAL_API_KEY`、`ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`DEEPSEEK_API_KEY`、`CLAUDIUS_API_KEY` 取第一个非空值，不按当前服务商筛选。推荐只留 `ORIGINAL_API_KEY` 或当前服务商那一个变量。
+**API 模式**：运行 `original`，输入 `/login`，先选「API」。再从内置预设中选择（Anthropic、OpenAI、DeepSeek Anthropic 兼容、DeepSeek OpenAI 兼容、自定义 Anthropic 兼容或自定义 OpenAI 兼容），然后填写 API Key（终端输入过程以 `*` 掩码隐藏回显）。菜单需要交互终端。内置项使用预设 URL 和默认模型，并写入该预设的上下文与输入/输出单价（与对照表中这些默认模型一致；缓存读取单价仅在对照表命中时写入）。自定义服务要填写服务地址，模型名为 `my-model`，上下文 128000，没有单价；接 Grok 官方 API 时可选择自定义 OpenAI 兼容、地址填 `https://api.x.ai/v1`，再用 `/model` 改成账号里的模型。API Key 留空则保留原密钥；base URL 变化时会先清掉已保存的密钥。换模型用 `/model <name>`。配置位于 `~/.original-agent/config.json`，密钥是本地明文（Unix 下以 `0o600` 权限写入）。环境变量可覆盖密钥，按 `ORIGINAL_API_KEY`、`ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`DEEPSEEK_API_KEY`、`CLAUDIUS_API_KEY` 取第一个非空值，不按当前服务商筛选。推荐只留 `ORIGINAL_API_KEY` 或当前服务商那一个变量。
 
 **官方客户端模式**：先安装对应 CLI 并加入 PATH，然后执行 `original --subscription codex`、`original --subscription claude` 或 `original --subscription gemini`，也可以在 `/login` 里选「订阅」。登录界面、鉴权、工具权限和额度由官方客户端负责。这只是交互式交接，**不是在 original 内直接使用订阅模型**；已有 API Key 登录不会自动变成订阅计费。本项目不获取浏览器 Cookie，也不复制官方 CLI 的认证缓存。
 
@@ -238,6 +238,6 @@ Grok 官方订阅接入尚未确认，`--subscription grok` 明确返回不支�
 
 ## 执行状态显示
 
-`original --show-thinking --command-timeout 120`：有则显示服务商返回的思考文本（每次模型响应返回后，不是流式逐字；Anthropic 为 thinking 块，OpenAI 兼容响应为 `reasoning_content`）。`--command-timeout` 默认 600 秒，允许 1–600，同时作为 shell 与自动验证的上限，不影响 HTTP 超时。Anthropic 工具显示指令/路径、耗时和成功/失败背景色；两种后端的 Shell 命令按退出码着色。OpenAI 普通文件工具仍是中性结果文字。NO_COLOR 或非终端输出禁用颜色。未进行付费 API 测试。
+`original --show-thinking --command-timeout 120`：有则显示服务商返回的思考文本（Anthropic 为每轮响应后的 thinking 块，OpenAI 兼容后端支持流式实时输出 `reasoning_content` 与回答文本）。`--command-timeout` 默认 600 秒，允许 1–600，同时作为 shell 与自动验证的上限，不影响 HTTP 超时。Anthropic 工具显示指令/路径、耗时和成功/失败背景色；两种后端的 Shell 命令按退出码着色。OpenAI 普通文件工具仍是中性结果文字。NO_COLOR 或非终端输出禁用颜色。未进行付费 API 测试。
 
 本地命令：`/settings`（别名 `/setting`、`/config`）查看配置并设置思考强度；`/usage` 查看当前会话 token 统计；`/history` 列出项目会话，`/history ID` 查看归档。

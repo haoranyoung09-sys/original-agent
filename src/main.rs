@@ -217,8 +217,20 @@ async fn run_openai_turn(
 ) -> Result<()> {
     archive::record("user", serde_json::json!(user_text));
     let archive_before = history.len();
-    let response =
-        openai_client::take_turn(client, model, cwd, history, user_text, max_tokens).await;
+    let context_window = session
+        .lock()
+        .map(|s| s.context_window)
+        .unwrap_or(config::DEFAULT_CONTEXT_WINDOW);
+    let response = openai_client::take_turn(
+        client,
+        model,
+        cwd,
+        history,
+        user_text,
+        max_tokens,
+        context_window,
+    )
+    .await;
     if let Err(e) = &response {
         archive::record("error", serde_json::json!(e.to_string()));
     }
@@ -380,6 +392,65 @@ fn apply_model_pricing_and_context(cfg: &mut Config) {
     }
 }
 
+fn read_secret(prompt: &str) -> Result<String> {
+    use crossterm::event::{
+        self, Event as CEvent, KeyCode as CKeyCode, KeyEventKind, KeyModifiers as CMods,
+    };
+    use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+    use std::io::{IsTerminal, Write};
+
+    print!("{prompt}");
+    std::io::stdout().flush()?;
+    if !std::io::stdin().is_terminal() {
+        let mut line = String::new();
+        std::io::stdin().read_line(&mut line)?;
+        return Ok(line.trim_end_matches(&['\r', '\n'][..]).to_string());
+    }
+
+    struct RawGuard;
+    impl Drop for RawGuard {
+        fn drop(&mut self) {
+            let _ = disable_raw_mode();
+        }
+    }
+    enable_raw_mode()?;
+    let _guard = RawGuard;
+    let mut buf = String::new();
+    loop {
+        if let CEvent::Key(key) = event::read()? {
+            if key.kind == KeyEventKind::Release {
+                continue;
+            }
+            match key.code {
+                CKeyCode::Enter => {
+                    println!("\r");
+                    return Ok(buf);
+                }
+                CKeyCode::Esc => {
+                    println!("\r");
+                    anyhow::bail!("已取消输入");
+                }
+                CKeyCode::Char('c') if key.modifiers.contains(CMods::CONTROL) => {
+                    println!("\r");
+                    anyhow::bail!("已取消输入");
+                }
+                CKeyCode::Backspace => {
+                    if buf.pop().is_some() {
+                        print!("\x08 \x08");
+                        std::io::stdout().flush()?;
+                    }
+                }
+                CKeyCode::Char(c) if !key.modifiers.contains(CMods::CONTROL) => {
+                    buf.push(c);
+                    print!("*");
+                    std::io::stdout().flush()?;
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
 fn do_login(
     rl: &mut Editor<ReplHelper, rustyline::history::DefaultHistory>,
     cfg: &mut Config,
@@ -387,20 +458,11 @@ fn do_login(
     agent: &OriginalAgent,
     backend: &mut Option<Backend>,
 ) -> Result<()> {
-    let choice = choose(
-        "选择服务商",
-        &["Anthropic", "OpenAI", "DeepSeek", "自定义服务"],
-    )?;
-    let id = [
-        ProviderId::Anthropic,
-        ProviderId::OpenAI,
-        ProviderId::DeepSeekOpenAI,
-        ProviderId::Custom,
-    ][choice];
-    let preset = presets()
-        .iter()
-        .find(|p| p.id == id && (id != ProviderId::Custom || p.api_style == ApiStyle::OpenAI))
-        .context("服务商预设不存在")?;
+    let all_presets = presets();
+    let labels: Vec<&str> = all_presets.iter().map(|p| p.label).collect();
+    let choice = choose("选择服务商", &labels)?;
+    let preset = &all_presets[choice];
+    let id = preset.id;
     let mut next = cfg.clone();
     next.provider = id;
     next.api_style = preset.api_style;
@@ -418,7 +480,7 @@ fn do_login(
     if cfg.base_url != next.base_url {
         next.api_key = None;
     }
-    let key = rl.readline("API Key: ")?;
+    let key = read_secret("API Key (留空保留原密钥): ")?;
     if !key.trim().is_empty() {
         next.api_key = Some(key.trim().into());
     }
@@ -534,11 +596,18 @@ async fn main() -> Result<()> {
         && std::io::stdin().is_terminal()
         && std::io::stdout().is_terminal()
     {
-        let root = cli
-            .cwd
-            .clone()
-            .unwrap_or(std::env::current_dir()?)
-            .canonicalize()?;
+        let root = match &cli.cwd {
+            Some(p) => {
+                let p = if p.is_absolute() {
+                    p.clone()
+                } else {
+                    std::env::current_dir()?.join(p)
+                };
+                std::fs::canonicalize(&p)
+                    .with_context(|| format!("无法解析 --cwd: {}", p.display()))?
+            }
+            None => workspace::discover_git_root(&std::env::current_dir()?),
+        };
         return terminal::run(&root);
     }
 
@@ -557,7 +626,7 @@ async fn main() -> Result<()> {
             };
             std::fs::canonicalize(&p).with_context(|| format!("无法解析 --cwd: {}", p.display()))?
         }
-        None => std::env::current_dir()?,
+        None => workspace::discover_git_root(&std::env::current_dir()?),
     };
 
     if let Some(client) = cli.subscription {

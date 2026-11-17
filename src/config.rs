@@ -172,12 +172,20 @@ impl Config {
                 .with_context(|| format!("创建配置目录失败: {}", dir.display()))?;
         }
         let raw = serde_json::to_string_pretty(self).context("序列化配置失败")?;
-        fs::write(path, raw).with_context(|| format!("写入配置失败: {}", path.display()))?;
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+            use std::io::Write;
+            use std::os::unix::fs::OpenOptionsExt;
+            let mut opts = fs::OpenOptions::new();
+            opts.write(true).create(true).truncate(true).mode(0o600);
+            let mut file = opts
+                .open(path)
+                .with_context(|| format!("写入配置失败: {}", path.display()))?;
+            file.write_all(raw.as_bytes())
+                .with_context(|| format!("写入配置失败: {}", path.display()))?;
         }
+        #[cfg(not(unix))]
+        fs::write(path, raw).with_context(|| format!("写入配置失败: {}", path.display()))?;
         Ok(())
     }
 

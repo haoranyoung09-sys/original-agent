@@ -51,6 +51,50 @@ pub fn print_answer(text: &str) {
     }
 }
 
+pub fn print_answer_chunk(text: &str) {
+    use std::io::Write;
+    if !text.is_empty() {
+        print!("{text}");
+        let _ = std::io::stdout().flush();
+    }
+}
+
+pub fn print_thought_chunk(text: &str, started: &mut bool) {
+    use std::io::{IsTerminal, Write};
+    if text.is_empty() {
+        return;
+    }
+    let styled = color_enabled() && std::io::stderr().is_terminal();
+    if !*started {
+        *started = true;
+        if styled {
+            eprint!("\x1b[2;3m思考\n│ ");
+        } else {
+            eprint!("思考\n│ ");
+        }
+    }
+    for ch in text.chars() {
+        if ch == '\n' {
+            eprint!("\n│ ");
+        } else {
+            eprint!("{ch}");
+        }
+    }
+    let _ = std::io::stderr().flush();
+}
+
+pub fn finish_thought_stream(started: bool) {
+    use std::io::{IsTerminal, Write};
+    if started {
+        if color_enabled() && std::io::stderr().is_terminal() {
+            eprintln!("\x1b[0m");
+        } else {
+            eprintln!();
+        }
+        let _ = std::io::stderr().flush();
+    }
+}
+
 #[cfg(test)]
 #[test]
 fn no_color_follows_nonempty_value_convention() {
@@ -343,21 +387,6 @@ pub fn input_footer(model: &str, effort: crate::session::EffortLevel, width: usi
         label,
         "─".repeat(width.saturating_sub(left + label_width))
     )
-}
-/// Prefer the visible Windows console viewport over a cached editor width.
-pub fn terminal_width(fallback: usize) -> usize {
-    #[cfg(windows)]
-    unsafe {
-        use windows_sys::Win32::System::Console::*;
-        let mut info = std::mem::zeroed();
-        if GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &mut info) != 0 {
-            let width = info.srWindow.Right - info.srWindow.Left + 1;
-            if width > 0 {
-                return width as usize;
-            }
-        }
-    }
-    fallback.max(4)
 }
 
 #[cfg(test)]

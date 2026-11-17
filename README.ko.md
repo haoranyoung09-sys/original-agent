@@ -53,7 +53,7 @@ curl -fsSL https://raw.githubusercontent.com/haoranyoung09-sys/original-agent/ma
 
 ## 첫 세션 시작하기
 
-프로젝트 디렉터리에서 `original`을 실행한 뒤 `/login`을 입력하세요. 방향키와 Enter로 API 연결 또는 구독을 선택합니다. API 연결에서는 Anthropic, OpenAI, DeepSeek 또는 호환 서비스를 고른 뒤 API 키를 입력합니다. 로그인한 후 `/model <name>`으로 모델을 바꿀 수 있습니다.
+프로젝트 디렉터리에서 `original`을 실행한 뒤 `/login`을 입력하세요. 방향키와 Enter로 API 연결 또는 구독을 선택합니다. API 연결에서는 Anthropic, OpenAI, DeepSeek(Anthropic / OpenAI 호환) 또는 사용자 지정 호환 서비스(Anthropic / OpenAI 호환)를 고른 뒤 API 키를 입력합니다(입력 시 `*`로 마스킹됩니다). 로그인한 후 `/model <name>`으로 모델을 바꿀 수 있습니다. `--cwd`를 생략하면 전체 화면/클래식 모드 모두 가장 가까운 `.git` 루트를 자동으로 찾습니다.
 
 구독을 선택하면 설치된 Codex, Claude Code 또는 Gemini CLI가 열립니다. 로그인과 사용 한도는 해당 클라이언트에서 관리합니다.
 
@@ -69,6 +69,6 @@ curl -fsSL https://raw.githubusercontent.com/haoranyoung09-sys/original-agent/ma
 
 ## 구성
 
-Rust 본체는 Anthropic 호환 API에 커뮤니티 SDK인 claudius를 사용하고, OpenAI 호환 API에는 reqwest를 사용합니다. Word와 PowerPoint 파일을 읽고 쓰려면 Python이, 이미지에서 글자를 추출하려면 Tesseract가 필요합니다.
+Rust 본체는 Anthropic 호환 API에 커뮤니티 SDK인 claudius를 사용하고, OpenAI 호환 API에는 reqwest(SSE 스트리밍, `429`/`5xx` 재시도, 컨텍스트 창 압축 지원)를 사용합니다. Word와 PowerPoint 파일을 읽고 쓰려면 Python이, 이미지에서 글자를 추출하려면 Tesseract가 필요합니다.
 
 [Office / OCR](docs/archive/office-tools.md) · [Security](SECURITY.md) · [MIT License](LICENSE)
