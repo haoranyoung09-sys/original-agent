@@ -93,6 +93,11 @@ fn request_messages(
     let mut seen = HashMap::new();
     let deduped: Vec<Cow<'_, ChatMessage>> = history
         .iter()
+        .filter(|message| {
+            !(message.role == "assistant"
+                && message.content.is_none()
+                && message.tool_calls.is_none())
+        })
         .map(|message| {
             if message.role == "tool" {
                 if let (Some(text), Some(id)) = (
@@ -256,6 +261,7 @@ struct StreamAccumulator {
     reasoning: String,
     tool_calls: Vec<StreamToolCall>,
     usage: OpenAiUsage,
+    finish_reason: Option<String>,
     thought_started: bool,
     printed_answer: bool,
 }
@@ -269,6 +275,14 @@ impl StreamAccumulator {
             let u = extract_usage(&v);
             if u.input_tokens > 0 || u.output_tokens > 0 || u.cache_read_tokens.is_some() {
                 self.usage = u;
+            }
+        }
+        if let Some(reason) = v
+            .pointer("/choices/0/finish_reason")
+            .and_then(Value::as_str)
+        {
+            if !reason.is_empty() {
+                self.finish_reason = Some(reason.to_string());
             }
         }
         let Some(delta) = v.pointer("/choices/0/delta") else {
@@ -312,7 +326,7 @@ impl StreamAccumulator {
         }
     }
 
-    fn finish(self) -> (OpenAiUsage, Option<Value>, Option<Value>) {
+    fn finish(self) -> (OpenAiUsage, Option<Value>, Option<Value>, Option<String>) {
         if self.thought_started {
             crate::ui::finish_thought_stream(true);
         }
@@ -343,14 +357,14 @@ impl StreamAccumulator {
                     .collect(),
             ))
         };
-        (self.usage, content, tool_calls)
+        (self.usage, content, tool_calls, self.finish_reason)
     }
 }
 
 async fn consume_response(
     mut resp: reqwest::Response,
     show_thinking: bool,
-) -> Result<(OpenAiUsage, Option<Value>, Option<Value>)> {
+) -> Result<(OpenAiUsage, Option<Value>, Option<Value>, Option<String>)> {
     let is_json = resp
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
@@ -365,14 +379,22 @@ async fn consume_response(
             .pointer("/choices/0")
             .cloned()
             .context("响应缺少 choices")?;
+        let finish_reason = choice
+            .get("finish_reason")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(ToOwned::to_owned);
         let message = choice.get("message").cloned().context("响应缺少 message")?;
         if show_thinking {
             if let Some(t) = message.get("reasoning_content").and_then(Value::as_str) {
                 crate::ui::print_thought(t);
             }
         }
-        let content = message.get("content").cloned();
-        let tool_calls = message.get("tool_calls").cloned();
+        let content = message.get("content").cloned().filter(|v| !v.is_null());
+        let tool_calls = message
+            .get("tool_calls")
+            .cloned()
+            .filter(|v| v.as_array().is_some_and(|a| !a.is_empty()));
         if let Some(Value::String(s)) = &content {
             if !s.trim().is_empty() {
                 crate::ui::print_answer(s);
@@ -388,7 +410,7 @@ async fn consume_response(
                 crate::ui::print_answer(&buf);
             }
         }
-        return Ok((usage, content, tool_calls));
+        return Ok((usage, content, tool_calls, finish_reason));
     }
 
     let mut acc = StreamAccumulator::default();
@@ -471,13 +493,35 @@ pub async fn take_turn(
         });
 
         let resp = send_with_retry(client, &body).await?;
-        let (usage, content, tool_calls) =
+        let (usage, content, tool_calls, finish_reason) =
             consume_response(resp, crate::tool_display::thinking_enabled()).await?;
 
         total.input_tokens += usage.input_tokens;
         total.output_tokens += usage.output_tokens;
         if let Some(cr) = usage.cache_read_tokens {
             total.cache_read_tokens = Some(total.cache_read_tokens.unwrap_or(0) + cr);
+        }
+
+        let has_content = match &content {
+            Some(Value::String(s)) => !s.is_empty(),
+            Some(Value::Array(a)) => !a.is_empty(),
+            Some(v) => !v.is_null(),
+            None => false,
+        };
+        let has_tools = tool_calls
+            .as_ref()
+            .and_then(Value::as_array)
+            .is_some_and(|a| !a.is_empty());
+
+        if !has_content && !has_tools {
+            if finish_reason.as_deref() == Some("length") {
+                eprintln!(
+                    "模型达到 max_tokens={max_tokens} 上限且未生成正文（可能思考过程耗尽输出预算）；可提高 --max-tokens、降低 effort（Shift+Tab），或开启 --show-thinking。"
+                );
+            } else {
+                eprintln!("模型本轮未返回正文或工具调用（已跳过无效空消息以免污染对话历史）。");
+            }
+            return Ok(total);
         }
 
         history.push(ChatMessage {
@@ -672,13 +716,51 @@ mod tests {
             r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"a.rs\"}"}}]}}],"usage":{"prompt_tokens":12,"completion_tokens":5}}"#,
             false,
         );
-        let (usage, content, tool_calls) = acc.finish();
+        let (usage, content, tool_calls, finish_reason) = acc.finish();
         assert_eq!(usage.input_tokens, 12);
         assert_eq!(usage.output_tokens, 5);
         assert!(content.is_none());
+        assert!(finish_reason.is_none());
         let tc = tool_calls.unwrap();
         assert_eq!(tc[0]["id"], "call_1");
         assert_eq!(tc[0]["function"]["name"], "read");
         assert_eq!(tc[0]["function"]["arguments"], "{\"path\":\"a.rs\"}");
+    }
+
+    #[test]
+    fn request_messages_drops_empty_assistant_messages() {
+        let history = vec![
+            ChatMessage {
+                role: "system".into(),
+                content: Some(json!("sys")),
+                tool_calls: None,
+                tool_call_id: None,
+                name: None,
+            },
+            ChatMessage {
+                role: "user".into(),
+                content: Some(json!("hello")),
+                tool_calls: None,
+                tool_call_id: None,
+                name: None,
+            },
+            ChatMessage {
+                role: "assistant".into(),
+                content: None,
+                tool_calls: None,
+                tool_call_id: None,
+                name: None,
+            },
+            ChatMessage {
+                role: "user".into(),
+                content: Some(json!("?")),
+                tool_calls: None,
+                tool_call_id: None,
+                name: None,
+            },
+        ];
+        let wire = request_messages(&history, 200_000);
+        assert_eq!(wire.len(), 3);
+        assert!(!wire.iter().any(|m| m.role == "assistant"));
     }
 }
