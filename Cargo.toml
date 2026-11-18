@@ -1,6 +1,6 @@
 [package]
 name = "original-agent"
-version = "0.3.11"
+version = "0.3.12"
 edition = "2021"
 description = "Rust terminal coding agent with multi-provider support, project verification, and local session history"
 license = "MIT"

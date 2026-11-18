@@ -9,18 +9,18 @@
 
 Original は Rust 製のターミナル向けコーディングエージェントです。自然言語でコードを検索し、ファイルを編集し、プロジェクトのテストを実行できます。ファイルツールの変更をプロセス内で取り消し、セッションをローカルに保存します。画面の考え方は [Pi](https://github.com/badlogic/pi-mono) を参考にしています。Pi、Anthropic、OpenAI、Google の公式製品ではありません。
 
-このソースのパッケージ版は `0.3.11` です。`original --version`、`Cargo.toml`、タグ `v0.3.11` は同じ番号です。古いタグ `v0.3.10` のパッケージ版は `0.3.9` のままで、リリースワークフローはタグとパッケージ版の一致を要求するため、`v0.3.10` にはプリビルドの添付がありません。
+このソースのパッケージ版は `0.3.12` です。`original --version`、`Cargo.toml`、タグ `v0.3.12` は同じ番号です。公開済みのタグ `v0.3.11` は当時の README とデモのマージを指したままで、パッケージ版は `0.3.11` です。そのタグは動かさないでください。古いタグ `v0.3.10` のパッケージ版は `0.3.9` のままで、リリースワークフローはタグとパッケージ版の一致を要求するため、`v0.3.10` にはプリビルドの添付がありません。
 
 バッジはすべてこのリポジトリの実データです。ダウンロード数やカバレッジは表示しません。
 
 - **Rust 1.100.0 stable** は Rust のロゴとツールチェーンの文字です。`Cargo.toml` に `rust-version` は無く、MSRV も宣言していません。`1.100.0` は 2026-11-12 に `rustup` が解決した stable です。CI と Release は浮動チャンネル `dtolnay/rust-toolchain@stable` を入れます。これは最低対応バージョンではありません。
 - **CI** は `main` の [`.github/workflows/ci.yml`](.github/workflows/ci.yml) の最新結果です。
-- **release** は GitHub 上の最新 Release です。この文書の作成時点では `v0.3.9` です。パッケージ `0.3.11` の添付は、そのタグの Release ワークフローがアップロードに成功してからこのバッジに出ます。
+- **release** は GitHub 上の最新 Release です。この文書の作成時点では `v0.3.11` で、四つのプラットフォームの添付が既にあります。パッケージ `0.3.12` の添付は、タグ `v0.3.12` の Release ワークフローがアップロードに成功してからこのバッジに出ます。
 - **license** はリポジトリのライセンスで、現在は [MIT](LICENSE) です。
 
 ## 最初に見ること
 
-1. [インストール](#インストールと更新)。Rust が無いときはインストールスクリプト、この版のソースは `cargo install --locked --tag v0.3.11` です。
+1. [インストール](#インストールと更新)。Rust が無いときはインストールスクリプト、この版のソースは `cargo install --locked --tag v0.3.12` です。
 2. `original` を起動して `/login` を入力します。ログイン前はモデルを呼び出せません。
 3. 対話端末は全画面で始まります。`original --classic` は行単位の画面です。
 
@@ -42,7 +42,7 @@ Original は Rust 製のターミナル向けコーディングエージェン�
 
 ## インストールと更新
 
-Rust なしのインストーラーは GitHub Release の添付をダウンロードし、SHA-256 を確認します。このチェックサムは独立したコード署名ではありません。この文書を書いた時点で、Windows x64、Linux x64、macOS Intel、macOS Apple Silicon の添付がある最新 Release は `v0.3.9` です。`v0.3.11` の添付は、そのタグが起動した Release ワークフローのアップロードが成功してから存在します。添付が無いときはインストールが失敗し、既存のバイナリは置き換えません。
+Rust なしのインストーラーは GitHub Release の添付をダウンロードし、SHA-256 を確認します。このチェックサムは独立したコード署名ではありません。この文書を書いた時点で、Windows x64、Linux x64、macOS Intel、macOS Apple Silicon の添付がある最新 Release は `v0.3.11` です。`v0.3.12` の添付は、そのタグが起動した Release ワークフローのアップロードが成功してから存在します。添付が無いときはインストールが失敗し、既存のバイナリは置き換えません。
 
 Windows (PowerShell, x64)。`iex (irm …)` を一つの式として実行します。
 
@@ -53,7 +53,7 @@ iex (irm https://raw.githubusercontent.com/haoranyoung09-sys/original-agent/main
 版を固定する:
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/haoranyoung09-sys/original-agent/main/scripts/install.ps1))) -Version v0.3.11
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/haoranyoung09-sys/original-agent/main/scripts/install.ps1))) -Version v0.3.12
 ```
 
 Linux x64 / macOS Intel または Apple Silicon:
@@ -61,7 +61,7 @@ Linux x64 / macOS Intel または Apple Silicon:
 ```sh
 curl -fsSL https://raw.githubusercontent.com/haoranyoung09-sys/original-agent/main/scripts/install.sh | sh
 # スクリプトを保存してから版を固定
-sh install.sh v0.3.11
+sh install.sh v0.3.12
 ```
 
 Windows は x64 のみで、`%USERPROFILE%\.original-agent\bin\original.exe` に置き、ユーザー PATH を更新します。現在の PowerShell にも追加されますが、開いている他の端末は開き直してください。Unix は `~/.local/bin/original` に置き、PATH に無ければ `export` の案内を出します。Linux バイナリは Ubuntu 22.04 で構築され、互換 glibc と、native-tls 経由のシステム OpenSSL が必要です。macOS と Windows の添付はその OpenSSL を使いません。
@@ -71,7 +71,7 @@ Windows は x64 のみで、`%USERPROFILE%\.original-agent\bin\original.exe` に
 ソースから入れるには安定版 Rust と各 OS のビルドツールが必要です。crates.io には未公開です。
 
 ```sh
-cargo install --locked --git https://github.com/haoranyoung09-sys/original-agent --tag v0.3.11 original-agent
+cargo install --locked --git https://github.com/haoranyoung09-sys/original-agent --tag v0.3.12 original-agent
 original --version
 ```
 
@@ -79,7 +79,7 @@ original --version
 
 ## ログイン、モデル、思考レベル
 
-`/login` は上下キーで選び、Enter で確定、Esc で取り消します。対話端末が必要です。最初に API かサブスクリプションを選びます。API のメニューは次の 6 つです。Anthropic、OpenAI、DeepSeek（Anthropic 互換）、DeepSeek（OpenAI 互換）、カスタム Anthropic 互換、カスタム OpenAI 互換。API キーの入力は `*` で隠します。空のまま確定すると保存済みキーを残します。base URL が変わると、保存済みキーは先に消えます。設定は `~/.original-agent/config.json` で、キーは平文です。Unix では `0o600` で書きます。
+`/login` は上下キーで選び、Enter で確定、Esc で取り消します。対話端末が必要です。最初のメニューは中国語の `API`、`本地模型 (GGUF / llama-server，无需运行 Ollama)`、`订阅` です。API のメニューは次の 6 つです。Anthropic、OpenAI、DeepSeek（Anthropic 互換）、DeepSeek（OpenAI 互換）、カスタム Anthropic 互換、カスタム OpenAI 互換。API キーの入力は `*` で隠します。空のまま確定すると保存済みキーを残します。base URL が変わると、保存済みキーは先に消えます。設定は `~/.original-agent/config.json` で、キーは平文です。Unix では `0o600` で書きます。
 
 | 接続 | 実装されている経路 |
 | --- | --- |
@@ -89,9 +89,42 @@ original --version
 | xAI / Grok | カスタム OpenAI 互換に `https://api.x.ai/v1` を入れ、その後 `/model` でモデルを指定します。組み込みのサブスクリプション OAuth は無く、価格表にも xAI はありません。`--subscription grok` は未対応と返します |
 | Gemini | 公式 Gemini CLI へ端末を渡します。ネイティブ Gemini API はありません |
 | カスタム | API の形式はメニューの 2 項目で選びます。その後に聞くのは URL だけです。モデルは `my-model`、コンテキストは 128000、単価はありません |
-| 手元のサーバー | 同梱のローカルモデル実行環境はありません。Ollama も Gemma もダウンロード、起動、埋め込みしません。すでに動いている OpenAI 互換サーバーの URL をカスタム OpenAI 項目へ入れることだけができます |
+| ローカル GGUF | `/login` で「本地模型」を選ぶ。既存の Ollama ウェイトか `.gguf` を読み、利用者が用意した `llama-server` を起動する。使い方と制限は次の節 |
+| すでに動いているサーバー | カスタム OpenAI 互換へ URL を入れる。この経路は `llama-server` を起動しない |
 
-URL は HTTPS です。HTTP は `localhost`、`127.0.0.1`、`[::1]` だけです。ユーザー情報、クエリ、フラグメントは拒否します。価格とコンテキストは `src/model_catalog.rs` の公開情報スナップショット（確認日 2026-11-06）で、公式サイトを実行時に取得しません。`/login` はプリセットのモデル、コンテキスト、入出力単価を保存します。キャッシュ読み取り単価は対照表にあるときだけ保存します。`/model <name>` は既知の ID でそれらを上書きし、未知の ID では現在値を残して注意を出します。公式 CLI の利用料はこの単価では計算しません。
+URL は HTTPS です。HTTP は `localhost`、`127.0.0.1`、`[::1]` だけです。ユーザー情報、クエリ、フラグメントは拒否します。価格とコンテキストは `src/model_catalog.rs` の公開情報スナップショット（確認日 2026-11-06）で、公式サイトを実行時に取得しません。`/login` はプリセットのモデル、コンテキスト、入出力単価を保存します。キャッシュ読み取り単価は対照表にあるときだけ保存します。`/model <name>` は既知の ID でそれらを上書きし、未知の ID では現在値を残して注意を出します。公式 CLI の利用料はこの単価では計算しません。ローカル GGUF のログインはコンテキストを 32768 にして単価を空にし、この対照表は使いません。
+
+## ローカル GGUF
+
+プロセス内推論はありません。モデルはダウンロードせず、Ollama も Gemma も埋め込みません。ローカル GGUF は、利用者が用意した外部の `llama-server` を起動するだけです。Ollama のデーモンには接続しません。
+
+検出結果はモデル ID で並べ、メニューの最後は常に手入力のパスです。
+
+- Ollama のディレクトリは、`OLLAMA_MODELS` が空でなければその値、なければ `~/.ollama/models` です。`manifests/` と `blobs/` を読みます。メディアタイプが `application/vnd.ollama.image.model` で、対応する blob ファイルがある層だけを使います。`registry.ollama.ai/library` は `モデル:タグ`、同じレジストリの別ネームスペースは `ネームスペース/モデル:タグ` と表示します。
+- `~/.original-agent/models` 以下、深さ 6 階層までの `.gguf` です。モデル ID は拡張子を除いたファイル名です。
+- 手入力のパスは既存のファイルでなければなりません。拡張子は見ません。モデル ID はファイル名の幹で、取れなければ `local-model` です。
+
+`llama-server` はリポジトリに無く、llama.cpp もダウンロードしません。探す順は `ORIGINAL_LLAMA_SERVER`（ファイルであること）、`~/.original-agent/bin/llama-server`（Windows では `llama-server.exe`）、その後 `PATH` です。見つからなければログインは失敗し、保存済み設定は変わりません。ログインは先に現在のバックエンドを手放します。起動に失敗すると、そのプロセス内の接続は切れており、次のメッセージは再度 `/login` を求めます。
+
+待受は `127.0.0.1` の空いているポートです。
+
+```text
+llama-server -m <gguf> --host 127.0.0.1 --port <ポート> --jinja -c <コンテキスト> --alias <モデル ID>
+```
+
+ローカルログインが保存するコンテキストは 32768 で、`-c` に渡す値は少なくとも 2048 です。標準出力と標準エラーは `~/.original-agent/llama-server.log` に書きます。`GET /health` が成功するまで最大 90 秒待ちます。早期終了やタイムアウトは失敗になり、ログ末尾の最大 12 行を添えます。この子プロセスは、終了時と別のログインへ切り替えるときを含めて、バックエンドが終わるときに kill されます。
+
+接続は同じ OpenAI Chat Completions クライアントで、アドレスは `http://127.0.0.1:<ポート>/v1`、ヘッダは常に `Authorization: Bearer local` です。別のローカル鍵へ変える設定はありません。単価は空なので費用見積もりも空です。成功すると端末は `已连接本地模型（未运行 Ollama）。` と表示し、その時点の URL、モデル ID、`local_model_path` を `~/.original-agent/config.json` に書きます。
+
+次回起動時、provider が `local` でモデル名と `local_model_path` が空でなければ、新しいポートで `llama-server` を再び起動します。対話モードで起動に失敗するとエラーを表示して未ログインのままにし、`/login` からやり直せます。一回限りのモードはエラーで終了します。新しいリクエストは新しいポートを使います。自動起動のたびに保存済み `base_url` を書き換えることはありません。
+
+これはコード上の制限であり、特定の GGUF で回答品質を確認したという意味ではありません。
+
+- プロセス内推論も、同梱のモデルや `llama-server` もありません。GPU、Vulkan、CPU は置いたバイナリ側の動作で、このプログラムはバックエンドを選びません。
+- 読み取るのは既にダウンロードされた Ollama のウェイトだけです。モデルが無ければこの走査は空です。
+- ツール呼び出しは OpenAI 互換の `tools` ループで、最大 24 ラウンドです。GGUF がツール呼び出しを出すかは、そのモデルと `llama-server` の会話テンプレートによります。このリポジトリは実ウェイトでの推論を検証していません。
+- 保存するコンテキストは 32768 固定で、GGUF メタデータの実際の窓は読みません。
+- 思考レベルは保存できますが、この経路は `reasoning_effort` を送りません。`--show-thinking` は応答に `reasoning_content` があるときだけ表示します。思考だけで本文もツール呼び出しも無いラウンドは対話履歴に残りません。
 
 環境変数は `ORIGINAL_API_KEY`、`ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`DEEPSEEK_API_KEY`、`CLAUDIUS_API_KEY` の順で、最初の空でない値を使います。選択中のプロバイダーでは絞りません。ユーザー設定ディレクトリの `.env` は読み、プロジェクトの `.env` は読みません。
 
@@ -110,13 +143,13 @@ original --show-tools
 original --show-thinking
 ```
 
-`-p` と位置引数はどちらも一回限りのプロンプトで、両方あるときは `-p` を使います。保存済み設定か環境変数の API キーが必要で、全画面には入りません。
+`-p` と位置引数はどちらも一回限りのプロンプトで、両方あるときは `-p` を使います。保存済みのログインが必要です。設定または環境変数の API キー、あるいは保存済みのローカル GGUF パスです。全画面には入りません。
 
 `--cwd` は起動時のカレントディレクトリから解決し、存在しなければならず、正規化します。Git ルートの探索はしません。省略した場合は、カレントディレクトリから上へ向かって最初の `.git` を作業ルートにします。無ければカレントディレクトリです。リポジトリのサブディレクトリで起動すると、ファイルツールの根は Git ルートです。ホームディレクトリ専用のプロジェクト選択メニューはありません。全画面とクラシック、および `--subscription` も同じディレクトリ規則です。ファイルツールは作業ルートの外へ出られません。対話ターンの終わりには、そのターンのファイルツールが記録したパスと、Git から見える未ステージ・未追跡の変化を出します。Git が使えなければファイルツールの記録だけです。
 
 | コマンド | 用途 |
 | --- | --- |
-| `/login` | API かサブスクリプションを選び、API ではプロバイダーとキーを入れる |
+| `/login` | API、ローカル GGUF、サブスクリプションから選ぶ。API ではプロバイダーとキー、ローカルでは既存ウェイトか手入力パス |
 | `/model`、`/model <name>` | モデルの表示または切り替え。既知 ID は対照表を適用 |
 | `/settings`、`/setting`、`/config` | モデル、思考レベル、タイムアウト、自動検証を見て、思考レベルを変更 |
 | `/status` | モデル、使用量、費用の見積もり |
@@ -142,6 +175,8 @@ Shift+Tab と `/settings` が保存するのは low、medium、high、max とい
 
 `--command-timeout` の既定は 600 秒、範囲は 1–600 です。シェルと自動検証の上限で、HTTP タイムアウトは変えません。OpenAI 互換クライアントの HTTP タイムアウトは 300 秒です。`429`、`500`、`502`、`503`、`504`、および接続、タイムアウト、リクエストの失敗は、最大 3 回追加で再試行します。待ち時間は指数バックオフ、または最大 30 秒の `Retry-After` です。それ以外の HTTP 失敗はステータスと本文を表示します。壊れたツール引数 JSON は、ツール結果の中のエラー文字列としてモデルへ戻します。ログイン失敗、API キー不足、モデル呼び出し失敗は端末の文字です。API、キー、モデルのエラーポップアップはありません。
 
+OpenAI 互換経路（ローカルの `llama-server` を含む）で、あるラウンドに本文もツール呼び出しも無いとき、その空の assistant メッセージは対話履歴へ書きません。後のリクエストでも、`content` と `tool_calls` が両方無い assistant メッセージは落とします。`finish_reason` が `length` のときは、出力が `--max-tokens` に達して本文が無いと端末に出します。それ以外は、本文もツール呼び出しも無く空メッセージを飛ばしたと出します。このラウンドは自動では再試行せず、対応するユーザーメッセージは履歴に残ります。この処理は Anthropic Messages 経路には適用しません。表示される「思考レベルを下げる」という案内は、OpenAI 互換リクエストの本文を変えません。`--show-thinking` はサーバーが返した `reasoning_content` を表示するだけで、出力予算は増えません。`--max-tokens` を上げるとリクエストの `max_tokens` は変わります。
+
 `--show-thinking` は、プロバイダーが実際に思考テキストを返したときだけ表示します。Anthropic は応答後の thinking ブロック、OpenAI 互換は流れる `reasoning_content` です。プログラムが思考文を作り出すことはありません。既定はオフです。
 
 `/diff` はプロセス内に残っている全文置換 diff で、最小の unified diff ではありません。`/undo` と `/undo all` はファイルツールのスナップショットだけを戻し、外部で変わったファイルは拒否します。スナップショットはメモリ上だけで、終了すると消えます。シェルや公式 CLI の変更は覆いません。一括書き込みの失敗時は復元を試み、復元失敗も報告します。電源断に対する原子性はありません。取り消し途中の I/O エラーでは一部だけ戻ることがあります。
@@ -156,7 +191,7 @@ Shift+Tab と `/settings` が保存するのは low、medium、high、max とい
 
 DOCX と PPTX の読み書きには Python 3 と `python-docx`、`python-pptx` が必要です。PNG、JPEG、BMP、TIFF の読み取りは PATH 上の Tesseract を `chi_sim+eng` で呼びます。これらが無いとそのファイル操作が文字エラーで失敗します。
 
-Rust 本体は Anthropic 互換 API にコミュニティ SDK の claudius 0.33.0 を使い、OpenAI 互換 API には reqwest を使います。OpenAI 互換は `stream: true` で、JSON の `Content-Type` なら一括 JSON として読みます。Responses API はありません。要求がコンテキスト窓に近づくと、送信するメッセージの古い中間ターンを削りますが、ローカル履歴とアーカイブは元のメッセージを保持します。
+Rust 本体は Anthropic 互換 API にコミュニティ SDK の claudius 0.33.0 を使い、OpenAI 互換 API には reqwest を使います。OpenAI 互換は `stream: true` で、JSON の `Content-Type` なら一括 JSON として読みます。Responses API はありません。ローカル GGUF もこのクライアントを使い、その前に外部の `llama-server` を起動します。要求がコンテキスト窓に近づくと、送信するメッセージの古い中間ターンを削りますが、ローカル履歴とアーカイブは元のメッセージを保持します。
 
 画面が崩れたら F10 で出て `original --classic` を試してください。
 

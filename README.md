@@ -9,18 +9,18 @@
 
 在终端里用自然语言查代码、改文件、运行项目测试。Original 以 Rust 构建，支持 Anthropic 和 OpenAI 兼容 API，内置改动回退和本地会话归档。交互设计参考 [Pi](https://github.com/badlogic/pi-mono)。
 
-当前源码的包版本是 `0.3.11`。`original --version`、`Cargo.toml` 与标签 `v0.3.11` 使用同一个版本号。更早的标签 `v0.3.10` 仍指向包版本 `0.3.9`，发布流程要求两者一致，所以该标签没有预编译附件。
+当前源码的包版本是 `0.3.12`。`original --version`、`Cargo.toml` 与标签 `v0.3.12` 使用同一个版本号。已发布的标签 `v0.3.11` 仍指向当时的 README 与演示合并，包版本是 `0.3.11`，不要移动它。更早的标签 `v0.3.10` 仍指向包版本 `0.3.9`，发布流程要求两者一致，所以该标签没有预编译附件。
 
 四枚徽章都指向本仓库的真实数据，没有下载量或覆盖率：
 
 - **Rust 1.100.0 stable** 使用 Rust 标志，文字是工具链版本。`Cargo.toml` 没有 `rust-version`，仓库也没有声明 MSRV。`1.100.0` 是 2026-11-12 由 `rustup` 解析到的 stable；CI 与 Release 工作流安装的是浮动通道 `dtolnay/rust-toolchain@stable`，不是最低支持版本。
 - **CI** 读取 `main` 分支上 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) 最近一次的实际结果。
-- **release** 读取 GitHub 最新已发布的 Release。编写本文时是 `v0.3.9`。源码包版本 `0.3.11` 的附件要等对应标签的 Release 工作流上传成功后，才会变成这个徽章显示的版本。
+- **release** 读取 GitHub 最新已发布的 Release。编写本文时是 `v0.3.11`，该 Release 已有四个平台的附件。源码包版本 `0.3.12` 的附件要等标签 `v0.3.12` 的 Release 工作流上传成功后，才会变成这个徽章显示的版本。
 - **license** 读取仓库许可证，当前是 [MIT](LICENSE)。
 
 ## 先看这里
 
-1. [安装](#安装)。没有 Rust 时运行安装脚本；安装这一版源码用 `cargo install --locked --tag v0.3.11`。
+1. [安装](#安装)。没有 Rust 时运行安装脚本；安装这一版源码用 `cargo install --locked --tag v0.3.12`。
 2. 运行 `original`，再输入 `/login`。没有登录时不能调用模型。
 3. 交互终端默认进入全屏。`original --classic` 使用行式界面。
 
@@ -42,7 +42,7 @@
 
 ## 安装
 
-无需 Rust 的安装方式下载 GitHub Release 附件并校验 SHA-256。校验不是独立代码签名。截至本文编写时，已带 Windows x64、Linux x64、macOS Intel 和 Apple Silicon 附件的最新 Release 是 `v0.3.9`。`v0.3.11` 的附件要等标签触发的 Release 工作流上传成功后才存在；附件缺失时安装失败，不会覆盖已有程序。
+无需 Rust 的安装方式下载 GitHub Release 附件并校验 SHA-256。校验不是独立代码签名。截至本文编写时，已带 Windows x64、Linux x64、macOS Intel 和 Apple Silicon 附件的最新 Release 是 `v0.3.11`。`v0.3.12` 的附件要等标签触发的 Release 工作流上传成功后才存在；附件缺失时安装失败，不会覆盖已有程序。
 
 Windows PowerShell（x64）。把 `iex (irm …)` 作为一整段执行，不要把脚本粘进交互提示符：
 
@@ -53,7 +53,7 @@ iex (irm https://raw.githubusercontent.com/haoranyoung09-sys/original-agent/main
 固定版本：
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/haoranyoung09-sys/original-agent/main/scripts/install.ps1))) -Version v0.3.11
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/haoranyoung09-sys/original-agent/main/scripts/install.ps1))) -Version v0.3.12
 ```
 
 不经过 `iex`：
@@ -68,7 +68,7 @@ Linux x64 / macOS Intel、Apple Silicon：
 ```sh
 curl -fsSL https://raw.githubusercontent.com/haoranyoung09-sys/original-agent/main/scripts/install.sh | sh
 # 下载脚本后固定版本
-sh install.sh v0.3.11
+sh install.sh v0.3.12
 ```
 
 Windows 仅 x64，安装到 `%USERPROFILE%\.original-agent\bin\original.exe` 并写入用户 PATH（当前 PowerShell 会话也会加上；其他已打开的终端需要重新打开）。Unix 安装到 `~/.local/bin`，目录不在 PATH 时会打印 `export` 提示。Linux 构建基于 Ubuntu 22.04，需要兼容的 glibc，并通过 native-tls 使用系统 OpenSSL。macOS 和 Windows 预编译包不使用这套 OpenSSL。
@@ -80,7 +80,7 @@ Windows 仅 x64，安装到 `%USERPROFILE%\.original-agent\bin\original.exe` 并
 需要稳定版 Rust 和平台编译工具。尚未发布到 crates.io。
 
 ```sh
-cargo install --locked --git https://github.com/haoranyoung09-sys/original-agent --tag v0.3.11 original-agent
+cargo install --locked --git https://github.com/haoranyoung09-sys/original-agent --tag v0.3.12 original-agent
 original --version
 ```
 
@@ -94,7 +94,7 @@ original --version
 
 - **运行时**：Tokio；Clap 解析启动参数；Rustyline 管理行式输入。全屏宿主使用 crossterm、portable-pty 和 vt100。
 - **Anthropic 协议**：社区 Rust SDK [claudius](https://github.com/rescrv/claudius) 0.33.0，位于 [vendor/claudius](vendor/claudius)。这不是 Anthropic 官方 Rust SDK。本地修改保留 Windows 编译适配，并把自定义工具序列化为不含服务端 `type` 标签的 schema。
-- **OpenAI 兼容协议**：reqwest 与 Serde 实现 Chat Completions 和工具循环。请求使用 `stream: true`；响应 `Content-Type` 为 JSON 时按整段 JSON 读取。没有 Responses API 后端。
+- **OpenAI 兼容协议**：reqwest 与 Serde 实现 Chat Completions 和工具循环。请求使用 `stream: true`；响应 `Content-Type` 为 JSON 时按整段 JSON 读取。没有 Responses API 后端。本地 GGUF 也使用这个客户端，前面多一个由本程序拉起的外部 `llama-server`。
 - **共享编码工具**：读、写、唯一替换、批量替换、glob、字面 grep、项目概览和验证，以及当前进程快照、回退和本地会话归档。
 
 ```mermaid
@@ -102,6 +102,8 @@ flowchart TD
     A[original CLI / REPL] --> B[配置与会话]
     B --> C[Anthropic: claudius 社区 SDK]
     B --> D[OpenAI compatible: reqwest]
+    B --> L[本地 GGUF: 发现权重并启动 llama-server]
+    L --> D
     C --> E[共享文件与验证工具]
     D --> E
     E --> F[工作区文件]
@@ -113,13 +115,14 @@ flowchart TD
 | --- | --- |
 | `src/main.rs`、`src/ui.rs`、`src/terminal.rs` | 启动、行式界面、全屏宿主 |
 | `src/agent.rs`、`src/openai_client.rs` | 两种协议的模型调用 |
+| `src/local_model.rs` | 发现已有 GGUF，启动并在后端结束时杀掉 `llama-server` |
 | `src/tools.rs`、`src/tool_dispatch.rs`、`src/fsops.rs` | 统一编码工具与文件操作 |
 | `src/changes.rs`、`src/archive.rs` | 进程内改动记录与磁盘会话归档 |
 | `src/subscription.rs` | 交接给已安装的官方客户端 |
 
 ## 模型兼容范围
 
-下表是当前代码里的预设和接入路径，不代表每个模型都经过真实账号测试。程序不内置本地模型运行时，不下载、不启动、也不嵌入 Ollama 或 Gemma。
+下表是当前代码里的预设和接入路径，不代表每个模型都经过真实账号测试。程序没有进程内推理，不下载模型，也不嵌入 Ollama 或 Gemma。本地 GGUF 会另外启动用户自己准备的 `llama-server`。
 
 | 服务 | 内置预设 / 接入方式 | 说明 |
 | --- | --- | --- |
@@ -129,9 +132,42 @@ flowchart TD
 | Grok / xAI | 自定义 OpenAI 兼容地址 `https://api.x.ai/v1` | 没有内置订阅 OAuth，对照表也不含 xAI 模型。`--subscription grok` 直接返回不支持 |
 | Gemini | 官方 Gemini CLI 交接 | 没有原生 Gemini API 后端 |
 | 自定义服务商 | 菜单分「自定义 Anthropic 兼容」和「自定义 OpenAI 兼容」 | 只再询问 URL。模型固定为 `my-model`，上下文 128000，没有单价。地址必须是 HTTPS；只有 `localhost`、`127.0.0.1` 和 `[::1]` 允许 HTTP。不能带账号、查询参数或片段 |
-| 用户自备的本地服务 | 无内置运行时 | 只能把已经在本机运行的 OpenAI 兼容服务填进自定义 OpenAI 地址。本程序不提供嵌入式推理 |
+| 本地 GGUF | `/login` 选「本地模型」 | 读取已有的 Ollama 权重或 `.gguf`，再启动用户自备的 `llama-server`。用法和限制见下一节 |
+| 已经在运行的 OpenAI 兼容服务 | 自定义 OpenAI 地址 | 把 URL 填进自定义 OpenAI 预设。这条路径不启动 `llama-server` |
 
-模型价格和上下文来自 `src/model_catalog.rs` 的公开资料快照，核对日期 2026-11-06，不会实时抓取官网。`/login` 写入预设的默认模型、上下文和输入/输出单价；缓存读取单价只在对照表命中时写入。`/model <name>` 再按模型名覆盖，未知模型保留当前值并提示。官方 CLI 模式不按本项目的 API 单价计算费用。
+模型价格和上下文来自 `src/model_catalog.rs` 的公开资料快照，核对日期 2026-11-06，不会实时抓取官网。`/login` 写入预设的默认模型、上下文和输入/输出单价；缓存读取单价只在对照表命中时写入。`/model <name>` 再按模型名覆盖，未知模型保留当前值并提示。官方 CLI 模式不按本项目的 API 单价计算费用。本地 GGUF 登录会把上下文写成 32768 并清空单价，不查这张对照表。
+
+## 本地 GGUF
+
+`/login` 的第一级菜单是「API」「本地模型 (GGUF / llama-server，无需运行 Ollama)」「订阅」。选本地模型时程序只使用本机已经存在的权重，不下载模型，也不连接 Ollama 守护进程。
+
+扫描结果按模型 ID 排序，菜单最后一项始终是手动输入路径：
+
+- Ollama 目录：`OLLAMA_MODELS` 非空时用它，否则用 `~/.ollama/models`。读取其中的 `manifests/` 和 `blobs/`。只采用媒体类型为 `application/vnd.ollama.image.model`、并且对应 blob 文件存在的层。`registry.ollama.ai/library` 下的清单显示为 `模型:标签`，其他 registry 命名空间显示为 `命名空间/模型:标签`。
+- `~/.original-agent/models` 里、递归深度不超过 6 层、扩展名为 `.gguf` 的文件。模型 ID 是去掉扩展名的文件名。
+- 手动路径必须是已经存在的文件，不检查扩展名。模型 ID 是文件名主干；取不到时用 `local-model`。
+
+`llama-server` 不在仓库里，程序也不会下载 llama.cpp。查找顺序是：`ORIGINAL_LLAMA_SERVER`（必须是一个文件）、`~/.original-agent/bin/llama-server`（Windows 上是 `llama-server.exe`）、然后是 `PATH`。找不到就登录失败，已保存的配置不变。登录会先放下当前后端；启动失败后，当前进程里的连接已经断开，下一条消息会要求重新 `/login`。
+
+找到之后，程序在 `127.0.0.1` 上选一个空闲端口并启动：
+
+```text
+llama-server -m <gguf> --host 127.0.0.1 --port <端口> --jinja -c <上下文> --alias <模型 ID>
+```
+
+本地登录写入的上下文是 32768；传给 `-c` 的值至少是 2048。标准输出和标准错误写到 `~/.original-agent/llama-server.log`。程序最多等 90 秒，直到 `GET /health` 返回成功。进程提前退出或超时都会失败，并带上日志末尾最多 12 行。这个子进程在当前后端结束时被杀掉，包括退出程序和改用别的登录方式。
+
+连接使用同一套 OpenAI Chat Completions 客户端，地址是 `http://127.0.0.1:<端口>/v1`，请求头固定为 `Authorization: Bearer local`，没有可以改的本地密钥。单价被清空，所以费用估算为空。成功时终端显示「已连接本地模型（未运行 Ollama）。」，并把当时的地址、模型 ID 和 `local_model_path` 写入 `~/.original-agent/config.json`。
+
+下次启动时，只要 provider 是 `local`、模型名非空、并且保存了非空的 `local_model_path`，就会再启动一次 `llama-server`，并改用新的端口。交互模式启动失败时打印错误，会话保持未登录，可以再输入 `/login`。一次性模式启动失败则进程报错退出。自动启动会用新端口发起请求，但不会在每次启动时改写已经保存的 `base_url`。
+
+这些限制是代码里的行为，不是对某个 GGUF 的推理验收：
+
+- 没有进程内推理，也没有随程序打包的模型或 `llama-server`。GPU、Vulkan 或 CPU 取决于你放进去的那个二进制，本程序不选择后端。
+- 只读取已经下载好的 Ollama 权重。Ollama 没有下过模型时，这一路扫描为空。
+- 工具调用沿用 OpenAI 兼容的 `tools` 循环，最多 24 轮。某个 GGUF 会不会发出工具调用，取决于该模型和 `llama-server` 的对话模板。本仓库没有用真实权重做推理验收。
+- 上下文固定写成 32768，不读取 GGUF 元数据里的真实窗口。
+- 思考强度可以保存，但这条路径不发送 `reasoning_effort`。`--show-thinking` 只在响应里有 `reasoning_content` 时显示；只有思考、没有正文也没有工具调用的一轮，不会写入对话历史。
 
 ## 登录方式
 
@@ -154,7 +190,7 @@ original --show-tools
 original --show-thinking
 ```
 
-`-p` 与后面的位置参数都是一次性提示，同时给出时使用 `-p`。一次性模式需要已保存的配置或环境变量里的 API Key，并且不进入全屏宿主。
+`-p` 与后面的位置参数都是一次性提示，同时给出时使用 `-p`。一次性模式需要已保存的登录：配置或环境变量里的 API Key，或者已保存的本地 GGUF 路径。它不进入全屏宿主。
 
 工作目录：
 
@@ -165,7 +201,7 @@ original --show-thinking
 
 | 操作 | 用途 |
 | --- | --- |
-| `/login` | 先选 API 或订阅；API 再选服务商并填 Key |
+| `/login` | 先选 API、本地 GGUF 或订阅。API 再选服务商并填 Key；本地模型再选已有权重或手动路径 |
 | `/model`、`/model <name>` | 查看或切换模型；已知 ID 套用对照表 |
 | `/settings`、`/setting`、`/config` | 查看模型、思考强度、超时和自动验证，并可改思考强度 |
 | `/status` | 模型、用量、费用估算 |
@@ -199,6 +235,8 @@ Shift+Tab 和 `/settings` 保存的是 low、medium、high、max 这四个名字
 `original --auto-verify` 与 `--allow-shell` 是两个开关。自动验证只运行检测到的项目命令：`Cargo.toml` → `cargo test --locked`，`package.json` → `npm test --silent`，`pyproject.toml` 或 `pytest.ini` → `python -m pytest -q`，`go.mod` → `go test ./...`。这些命令会执行仓库代码。交互模式在本轮文件工具有新记录，或 Git 可见的未暂存/未跟踪文件有变化时才验证。失败后把截短输出交回模型，最多再修三轮；某一轮没有新的工作区改动就停止。找不到命令时只打印说明。一次性模式只验证一次，不请求模型修复；找不到命令或测试非零退出时，进程以错误结束。
 
 `--command-timeout` 默认 600 秒，允许 1–600，同时限制 shell 和自动验证，不改变 HTTP 超时。OpenAI 兼容客户端的 HTTP 超时是 300 秒。`429`、`500`、`502`、`503`、`504` 以及连接、超时和请求错误最多再试 3 次，等待时间为指数退避或响应头 `Retry-After`（最多 30 秒）。其他 HTTP 错误把状态码和响应正文打印出来。畸形工具参数 JSON 会作为工具结果里的错误文字返回给模型。登录失败、缺少 API Key 和模型调用失败都写在终端文字里，不使用 API、密钥或模型错误弹窗。
+
+OpenAI 兼容路径（包括本地 `llama-server`）如果某一轮既没有正文也没有工具调用，不会把这条空的 assistant 消息写入对话历史。之后组请求时，也会丢掉 `content` 和 `tool_calls` 都缺失的 assistant 消息。`finish_reason` 为 `length` 时，终端提示输出达到 `--max-tokens` 且没有正文；其他情况提示本轮没有正文或工具调用，已跳过空消息。程序不自动重试这一轮，对应用户消息仍留在历史里。这条处理不作用于 Anthropic Messages 路径。提示里提到的降低思考强度不会改变 OpenAI 兼容请求体；`--show-thinking` 只显示服务商返回的 `reasoning_content`，不会增加输出预算。提高 `--max-tokens` 会改变请求里的 `max_tokens`。
 
 `--show-thinking` 在服务商实际返回思考文本时才显示。Anthropic 显示每轮响应后的 thinking 块；OpenAI 兼容后端可以流式显示 `reasoning_content`。程序不编造思考内容。默认关闭。
 

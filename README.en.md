@@ -9,18 +9,18 @@
 
 Explore code, edit files, and run project tests from the terminal. Original is a Rust coding agent with Anthropic and OpenAI-compatible backends, in-process file undo, and local session archives. The interaction draws on [Pi](https://github.com/badlogic/pi-mono).
 
-This source is package version `0.3.11`. `original --version`, `Cargo.toml`, and tag `v0.3.11` use that same number. The older tag `v0.3.10` still points at package `0.3.9`. The release workflow requires the tag and package version to match, so `v0.3.10` has no prebuilt assets.
+This source is package version `0.3.12`. `original --version`, `Cargo.toml`, and tag `v0.3.12` use that same number. The published tag `v0.3.11` still points at the earlier README and demo merge, whose package version is `0.3.11`. Leave that tag where it is. The older tag `v0.3.10` still points at package `0.3.9`. The release workflow requires the tag and package version to match, so `v0.3.10` has no prebuilt assets.
 
 The four badges read this repository. They do not claim downloads or coverage:
 
 - **Rust 1.100.0 stable** is the Rust logo plus the toolchain text. `Cargo.toml` has no `rust-version`, and the repository declares no MSRV. `1.100.0` is the stable toolchain `rustup` resolved on 2026-11-12. CI and the release workflow install the floating channel `dtolnay/rust-toolchain@stable`; that channel is not a minimum supported version.
 - **CI** is the latest result of [`.github/workflows/ci.yml`](.github/workflows/ci.yml) on `main`.
-- **release** is the newest GitHub Release. When this page was written, that release was `v0.3.9`. Assets for package `0.3.11` appear in the badge only after that tag's release workflow uploads them.
+- **release** is the newest GitHub Release. When this page was written, that release was `v0.3.11`, and it already has the four platform assets. Assets for package `0.3.12` appear in the badge only after the `v0.3.12` release workflow uploads them.
 - **license** is the repository license, currently [MIT](LICENSE).
 
 ## Start here
 
-1. [Install](#installation). Use the installer when Rust is not available, or `cargo install --locked --tag v0.3.11` for this source.
+1. [Install](#installation). Use the installer when Rust is not available, or `cargo install --locked --tag v0.3.12` for this source.
 2. Run `original`, then `/login`. The program cannot call a model before login.
 3. An interactive terminal starts full screen. `original --classic` uses the line interface.
 
@@ -42,7 +42,7 @@ The host runs this same program inside an embedded terminal. Login, settings, an
 
 ## Installation
 
-The no-Rust installers download GitHub Release assets and verify SHA-256. The checksum is not an independent code signature. When this file was written, the newest Release that already contained Windows x64, Linux x64, macOS Intel, and macOS Apple Silicon assets was `v0.3.9`. Assets for `v0.3.11` exist only after the release workflow for that tag uploads them. A missing asset aborts installation and does not replace an existing binary.
+The no-Rust installers download GitHub Release assets and verify SHA-256. The checksum is not an independent code signature. When this file was written, the newest Release that already contained Windows x64, Linux x64, macOS Intel, and macOS Apple Silicon assets was `v0.3.11`. Assets for `v0.3.12` exist only after the release workflow for that tag uploads them. A missing asset aborts installation and does not replace an existing binary.
 
 Windows x64, PowerShell. Run `iex (irm …)` as one expression:
 
@@ -53,7 +53,7 @@ iex (irm https://raw.githubusercontent.com/haoranyoung09-sys/original-agent/main
 Pin a version:
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/haoranyoung09-sys/original-agent/main/scripts/install.ps1))) -Version v0.3.11
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/haoranyoung09-sys/original-agent/main/scripts/install.ps1))) -Version v0.3.12
 ```
 
 Without `iex`:
@@ -68,7 +68,7 @@ Linux x64 / macOS Intel or Apple Silicon:
 ```sh
 curl -fsSL https://raw.githubusercontent.com/haoranyoung09-sys/original-agent/main/scripts/install.sh | sh
 # pin a version after downloading the script
-sh install.sh v0.3.11
+sh install.sh v0.3.12
 ```
 
 Windows x64 installs `%USERPROFILE%\.original-agent\bin\original.exe` and updates the user PATH, including the current PowerShell session. Reopen other terminals. Unix installs `~/.local/bin/original` and prints an `export` line when that directory is not on `PATH`. Linux binaries are built on Ubuntu 22.04, need a compatible glibc, and use the system OpenSSL through native-tls. The macOS and Windows builds do not.
@@ -80,7 +80,7 @@ Update by running the same installer again. On Windows, quit a running `original
 Stable Rust and the platform build tools are required. The crate is not published to crates.io.
 
 ```sh
-cargo install --locked --git https://github.com/haoranyoung09-sys/original-agent --tag v0.3.11 original-agent
+cargo install --locked --git https://github.com/haoranyoung09-sys/original-agent --tag v0.3.12 original-agent
 original --version
 ```
 
@@ -94,20 +94,21 @@ This is a standalone Rust 2021 terminal application. It is not an official Rust 
 
 - Tokio runs async work, Clap parses arguments, and Rustyline edits lines. The full-screen host uses crossterm, portable-pty, and vt100.
 - Anthropic Messages uses community SDK [claudius](https://github.com/rescrv/claudius) 0.33.0 in [vendor/claudius](vendor/claudius). It is not an official Anthropic Rust SDK. Local patches cover Windows builds and untagged custom-tool schemas.
-- OpenAI-compatible Chat Completions uses reqwest and Serde. Requests set `stream: true`. A JSON `Content-Type` is read as one JSON body. There is no Responses API backend.
+- OpenAI-compatible Chat Completions uses reqwest and Serde. Requests set `stream: true`. A JSON `Content-Type` is read as one JSON body. There is no Responses API backend. Local GGUF uses this same client after the program starts an external `llama-server`.
 - Shared tools read, write, edit, multi-edit, glob, literal grep, summarize a project, and verify. `changes.rs` keeps in-process snapshots and `archive.rs` stores session files.
 
 | Module | Responsibility |
 | --- | --- |
 | `src/main.rs`, `src/ui.rs`, `src/terminal.rs` | Startup, line UI, full-screen host |
 | `src/agent.rs`, `src/openai_client.rs` | Provider calls |
+| `src/local_model.rs` | Finds existing GGUF weights, starts `llama-server`, and kills it when that backend ends |
 | `src/tools.rs`, `src/tool_dispatch.rs`, `src/fsops.rs` | Shared tools and file operations |
 | `src/changes.rs`, `src/archive.rs` | Undo snapshots and session archives |
 | `src/subscription.rs` | Handoff to an installed official CLI |
 
 ## Model compatibility
 
-These are implemented presets, not a claim that every model was tested with a live account. The program does not bundle a local model runtime. It does not download, start, or embed Ollama or Gemma.
+These are implemented presets, not a claim that every model was tested with a live account. The program has no in-process inference. It does not download a model and it does not embed Ollama or Gemma. Local GGUF starts a `llama-server` binary that you supply.
 
 | Provider | Preset or integration | Notes |
 | --- | --- | --- |
@@ -117,9 +118,42 @@ These are implemented presets, not a claim that every model was tested with a li
 | xAI / Grok | Custom OpenAI-compatible URL `https://api.x.ai/v1` | No subscription OAuth and no xAI prices in the catalog. `--subscription grok` returns unsupported |
 | Gemini | Official Gemini CLI handoff | No native Gemini API backend |
 | Custom providers | Separate menu entries for custom Anthropic-compatible and custom OpenAI-compatible | The next prompt asks only for the URL. The model is `my-model`, the context window is 128000, and there are no prices. Use HTTPS, or HTTP only for `localhost`, `127.0.0.1`, or `[::1]`. Credentials, queries, and fragments are rejected |
-| A server you already run | No bundled runtime | Put its OpenAI-compatible URL in the custom OpenAI preset. This program does not provide embedded inference |
+| Local GGUF | `/login`, then "local model" | Reads an existing Ollama weight or `.gguf` file, then starts your `llama-server`. See the next section |
+| An OpenAI-compatible server you already run | Custom OpenAI URL | Put the URL in the custom OpenAI preset. This path does not start `llama-server` |
 
-Prices and context windows come from the snapshot in `src/model_catalog.rs`, reviewed 2026-11-06, not from a live provider page. `/login` stores the preset model, context window, and input/output prices. A cache-read price is stored only when the catalog has one. `/model <name>` overwrites those fields for a known ID and keeps the current values, with a note, for an unknown ID. Official CLI handoff is not priced with this catalog.
+Prices and context windows come from the snapshot in `src/model_catalog.rs`, reviewed 2026-11-06, not from a live provider page. `/login` stores the preset model, context window, and input/output prices. A cache-read price is stored only when the catalog has one. `/model <name>` overwrites those fields for a known ID and keeps the current values, with a note, for an unknown ID. Official CLI handoff is not priced with this catalog. Local GGUF login writes a context window of 32768, clears prices, and does not consult the catalog.
+
+## Local GGUF
+
+The first `/login` menu items are the Chinese labels `API`, `本地模型 (GGUF / llama-server，无需运行 Ollama)`, and `订阅`. The local choice uses weights that are already on disk. It does not download a model and it does not connect to the Ollama daemon.
+
+Discovered rows are sorted by model ID. The last menu row is always a manual path:
+
+- Ollama directory: `OLLAMA_MODELS` when that variable is non-empty, otherwise `~/.ollama/models`. The scan reads `manifests/` and `blobs/`. It keeps only a layer whose media type is `application/vnd.ollama.image.model` and whose blob file exists. A `registry.ollama.ai/library` manifest is shown as `model:tag`. Another namespace under that registry is shown as `namespace/model:tag`.
+- `.gguf` files under `~/.original-agent/models`, at most six directories deep. The model ID is the file name without the extension.
+- A manual path must already be a file. The extension is not checked. The model ID is the file stem, or `local-model` when there is no stem.
+
+`llama-server` is not in this repository, and the program does not download llama.cpp. The search order is `ORIGINAL_LLAMA_SERVER` (it must be a file), `~/.original-agent/bin/llama-server` (`llama-server.exe` on Windows), then `PATH`. If none is found, login fails and the saved config stays unchanged. Login drops the current in-memory backend first. After a failed start, that connection is gone, and the next message asks for `/login` again.
+
+The process listens on `127.0.0.1` and a free port:
+
+```text
+llama-server -m <gguf> --host 127.0.0.1 --port <port> --jinja -c <context> --alias <model id>
+```
+
+Local login stores a context window of 32768. The value passed to `-c` is at least 2048. Standard output and standard error go to `~/.original-agent/llama-server.log`. The program waits up to 90 seconds for `GET /health` to succeed. An early exit or a timeout fails the login and includes up to the last 12 log lines. The child is killed when this backend ends, including process exit and a switch to another login.
+
+Requests use the same OpenAI Chat Completions client at `http://127.0.0.1:<port>/v1`. The header is always `Authorization: Bearer local`. There is no setting for a different local key. Prices are cleared, so the cost estimate is empty. On success the terminal prints `已连接本地模型（未运行 Ollama）。` and writes the live URL, model ID, and `local_model_path` to `~/.original-agent/config.json`.
+
+On the next launch, a `local` provider with a non-empty model and a non-empty `local_model_path` starts `llama-server` again on a new port. Interactive startup failure prints the error and leaves the session logged out, so `/login` can be used again. One-shot mode exits with that error. The new request uses the new port. A later automatic start does not rewrite the saved `base_url`.
+
+These are limits of the code, not a claim that a particular GGUF was checked for answer quality:
+
+- There is no in-process inference and no bundled model or `llama-server`. GPU, Vulkan, or CPU behavior comes from the binary you installed. This program does not choose that backend.
+- Only Ollama weights that are already downloaded are visible. If Ollama has no models, that scan is empty.
+- Tool calls use the OpenAI-compatible `tools` loop, at most 24 rounds. Whether a GGUF file emits tool calls depends on that model and on `llama-server`'s chat template. This repository has not validated inference against real weights.
+- The stored context window is fixed at 32768. It is not read from GGUF metadata.
+- Effort can still be saved, but this path does not send `reasoning_effort`. `--show-thinking` prints `reasoning_content` only when the response includes it. A turn that has only reasoning, with no content and no tool call, is not stored in the conversation.
 
 ## Authentication
 
@@ -154,7 +188,7 @@ original --show-tools
 original --show-thinking
 ```
 
-`-p` wins when both it and positional text are present. One-shot mode needs a saved config or an API key in the environment, and it does not enter the full-screen host.
+`-p` wins when both it and positional text are present. One-shot mode needs a saved login: an API key in the config or environment, or a saved local GGUF path. It does not enter the full-screen host.
 
 - `--cwd <path>` is resolved from the process current directory, must exist, and is canonicalized. It skips the Git-root walk.
 - Without `--cwd`, the workspace is the nearest ancestor containing `.git`, or the current directory when none exists. Starting in a repository subdirectory roots file tools at the Git root. There is no home-directory project picker.
@@ -163,7 +197,7 @@ original --show-thinking
 
 | Command | Behavior |
 | --- | --- |
-| `/login` | Choose API or subscription, then a provider and API key |
+| `/login` | Choose API, local GGUF, or subscription. API then asks for a provider and key; local asks for a discovered weight or a manual path |
 | `/model`, `/model <name>` | Show or switch the model and apply a known catalog entry |
 | `/settings`, `/setting`, `/config` | Show model, effort, timeout, and auto-verify; change effort |
 | `/status` | Model, usage, and cost estimate |
@@ -190,6 +224,8 @@ Shared tools are `project_overview`, `glob`, `grep`, `read`, `edit`, `write`, `m
 `original --auto-verify` is separate from `--allow-shell`. It runs one detected project command: `Cargo.toml` → `cargo test --locked`, `package.json` → `npm test --silent`, `pyproject.toml` or `pytest.ini` → `python -m pytest -q`, `go.mod` → `go test ./...`. Those commands execute repository code. In an interactive session, verification runs when this turn recorded a file-tool edit or Git reports a new unstaged or untracked change. On failure, shortened stdout and stderr go back to the model for at most three repair turns. A repair turn with no new workspace change stops the loop. If no project command is detected, the program prints that and continues. One-shot mode verifies once and does not ask for a repair. A missing command or a non-zero test makes the process fail.
 
 `--command-timeout` defaults to 600 seconds and accepts 1–600. It caps shell commands and automatic verification. It does not change the HTTP timeout. The OpenAI-compatible client times out HTTP after 300 seconds. Status `429`, `500`, `502`, `503`, and `504`, plus connect, timeout, and request errors, are retried up to three more times using exponential backoff or a `Retry-After` value capped at 30 seconds. Other HTTP failures print the status and body. Malformed tool-argument JSON is returned to the model as error text in the tool result. Login failure, a missing API key, and a failed model call are terminal text. There is no API, key, or model error popup.
+
+On the OpenAI-compatible path, including local `llama-server`, a turn with neither content nor tool calls is not stored as an assistant message. Later requests also omit assistant messages that have neither `content` nor `tool_calls`. When `finish_reason` is `length`, the terminal says the output hit `--max-tokens` and produced no body. Otherwise it says this turn had no body or tool call and the empty message was skipped. The turn is not retried. The user message stays in history. This handling does not apply to the Anthropic Messages path. The printed hint about lowering effort does not change an OpenAI-compatible request. `--show-thinking` only displays `reasoning_content` returned by the server and does not raise the output budget. Raising `--max-tokens` does change `max_tokens` in the request.
 
 `--show-thinking` prints thinking text only when the provider returns it: Anthropic thinking blocks after a response, or streamed `reasoning_content` on the OpenAI-compatible path. The program does not invent thinking text. The switch defaults to off.
 
