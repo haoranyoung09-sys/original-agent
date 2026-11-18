@@ -188,6 +188,33 @@ pub fn diff() -> String {
     }
 }
 
+pub fn diff_styled() -> String {
+    use std::io::IsTerminal;
+    let raw = diff();
+    if !crate::ui::color_enabled()
+        || !std::io::stdout().is_terminal()
+        || raw == "No recorded changes"
+    {
+        return raw;
+    }
+    raw.lines()
+        .map(|line| {
+            if line.starts_with("+++") || line.starts_with("---") {
+                format!("\x1b[1m{line}\x1b[0m")
+            } else if line.starts_with("@@") {
+                format!("\x1b[36m{line}\x1b[0m")
+            } else if line.starts_with('+') {
+                format!("\x1b[32m{line}\x1b[0m")
+            } else if line.starts_with('-') {
+                format!("\x1b[31m{line}\x1b[0m")
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub fn revision() -> usize {
     history().lock().unwrap().len()
 }

@@ -26,6 +26,28 @@ pub struct OriginalAgent {
     runtime: Arc<Mutex<AgentRuntime>>,
 }
 
+fn load_project_instructions(cwd: &std::path::Path) -> String {
+    const MAX_BYTES: usize = 8192;
+    for name in ["ORIGINAL.md", "AGENTS.md"] {
+        let path = cwd.join(name);
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            let trimmed = content.trim();
+            if !trimmed.is_empty() {
+                let mut snippet = String::new();
+                for ch in trimmed.chars() {
+                    if snippet.len() + ch.len_utf8() > MAX_BYTES {
+                        snippet.push_str("\n… [truncated]");
+                        break;
+                    }
+                    snippet.push(ch);
+                }
+                return format!("\n项目指令（{name}）:\n{snippet}\n");
+            }
+        }
+    }
+    String::new()
+}
+
 /// Shared system prompt used by both Anthropic and OpenAI-compatible backends.
 pub fn system_prompt_text(cwd: &std::path::Path) -> String {
     let shell = if cfg!(windows) {
@@ -33,6 +55,7 @@ pub fn system_prompt_text(cwd: &std::path::Path) -> String {
     } else {
         "POSIX sh（bash/verify 通过 sh -c；默认禁用，需 --allow-shell）"
     };
+    let project_notes = load_project_instructions(cwd);
     format!(
         r#"你是 original，一个运行在本地工作区中的终端 vibe-coding agent（风格类似 Pi）。
 
@@ -55,10 +78,11 @@ Vibe coding 工作流:
 3. 路径一律相对工作区；禁止逃逸工作区。
 4. Shell 默认关闭：不要假设能跑 bash/verify；没有权限时说明并给出建议命令。
 5. {response_style}
-"#,
+{project_notes}"#,
         cwd = cwd.display(),
         shell = shell,
         response_style = crate::ui::RESPONSE_STYLE,
+        project_notes = project_notes,
     )
 }
 

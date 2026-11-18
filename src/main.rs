@@ -301,10 +301,10 @@ impl ConditionalEventHandler for CycleEffortHandler {
         _positive: bool,
         _ctx: &EventContext,
     ) -> Option<Cmd> {
-        let new_effort = {
+        let (new_effort, snapshot) = {
             let mut s = self.session.lock().ok()?;
             s.effort = s.effort.cycle();
-            s.effort
+            (s.effort, s.clone())
         };
         if let Ok(mut rt) = self.runtime.lock() {
             rt.effort = new_effort;
@@ -312,24 +312,77 @@ impl ConditionalEventHandler for CycleEffortHandler {
         if let Ok(mut cfg) = Config::load() {
             cfg.effort = new_effort;
             let _ = cfg.save();
+            ui::emit_host_status(&snapshot, &cfg);
+        } else {
+            ui::emit_host_status(&snapshot, &Config::default());
         }
         Some(Cmd::Repaint)
     }
 }
 
-#[derive(Clone, Default)]
+struct ToggleThinkingHandler {
+    session: SharedSession,
+}
+
+impl ConditionalEventHandler for ToggleThinkingHandler {
+    fn handle(
+        &self,
+        _evt: &Event,
+        _n: RepeatCount,
+        _positive: bool,
+        _ctx: &EventContext,
+    ) -> Option<Cmd> {
+        let next = !tool_display::thinking_enabled();
+        tool_display::SHOW_THINKING.store(next, std::sync::atomic::Ordering::Relaxed);
+        if let Ok(s) = self.session.lock() {
+            let cfg = Config::load().unwrap_or_default();
+            ui::emit_host_status(&s, &cfg);
+        }
+        Some(Cmd::Repaint)
+    }
+}
+
+#[derive(Clone)]
 struct ReplHelper {
     input_frame: bool,
+    session: SharedSession,
 }
 
 impl rustyline::Helper for ReplHelper {}
 impl rustyline::completion::Completer for ReplHelper {
     type Candidate = rustyline::completion::Pair;
+
+    fn complete(
+        &self,
+        line: &str,
+        pos: usize,
+        _ctx: &rustyline::Context<'_>,
+    ) -> rustyline::Result<(usize, Vec<Self::Candidate>)> {
+        let prefix = &line[..pos];
+        if !prefix.starts_with('/') || prefix.contains(char::is_whitespace) {
+            return Ok((0, Vec::new()));
+        }
+        let matches = commands::SLASH_COMMANDS
+            .iter()
+            .filter(|cmd| cmd.starts_with(prefix))
+            .map(|cmd| rustyline::completion::Pair {
+                display: (*cmd).to_string(),
+                replacement: (*cmd).to_string(),
+            })
+            .collect();
+        Ok((0, matches))
+    }
 }
 impl rustyline::hint::Hinter for ReplHelper {
     type Hint = String;
-    fn hint(&self, _line: &str, _pos: usize, _ctx: &rustyline::Context<'_>) -> Option<String> {
-        None
+    fn hint(&self, line: &str, pos: usize, _ctx: &rustyline::Context<'_>) -> Option<String> {
+        if pos != line.len() || !line.starts_with('/') || line.contains(char::is_whitespace) {
+            return None;
+        }
+        commands::SLASH_COMMANDS
+            .iter()
+            .find(|cmd| cmd.starts_with(line) && **cmd != line)
+            .map(|cmd| cmd[line.len()..].to_string())
     }
 }
 impl rustyline::highlight::Highlighter for ReplHelper {
@@ -339,9 +392,22 @@ impl rustyline::highlight::Highlighter for ReplHelper {
         _default: bool,
     ) -> std::borrow::Cow<'b, str> {
         if self.input_frame {
-            return std::borrow::Cow::Owned(ui::color_prompt(prompt));
+            let effort = self
+                .session
+                .lock()
+                .map(|s| s.effort)
+                .unwrap_or(session::EffortLevel::Medium);
+            return std::borrow::Cow::Owned(ui::color_prompt_for_effort(prompt, effort));
         }
         std::borrow::Cow::Borrowed(prompt)
+    }
+
+    fn highlight_hint<'h>(&self, hint: &'h str) -> std::borrow::Cow<'h, str> {
+        if ui::color_enabled() {
+            std::borrow::Cow::Owned(format!("\x1b[2m{hint}\x1b[0m"))
+        } else {
+            std::borrow::Cow::Borrowed(hint)
+        }
     }
 }
 impl rustyline::validate::Validator for ReplHelper {
@@ -824,7 +890,10 @@ async fn main() -> Result<()> {
     if oneshot.is_none() {
         let s = session.lock().unwrap();
         ui::print_startup(&cwd, &s, &cfg);
+        ui::emit_host_status(&s, &cfg);
     }
+
+    let mut auto_verify = cli.auto_verify;
 
     if let Some(text) = oneshot {
         let backend = backend
@@ -871,12 +940,21 @@ async fn main() -> Result<()> {
 
     let mut rl = Editor::<ReplHelper, rustyline::history::DefaultHistory>::new()
         .context("初始化 REPL 失败")?;
-    rl.set_helper(Some(ReplHelper { input_frame: false }));
+    rl.set_helper(Some(ReplHelper {
+        input_frame: false,
+        session: session.clone(),
+    }));
     rl.bind_sequence(
         KeyEvent(KeyCode::BackTab, Modifiers::NONE),
         EventHandler::Conditional(Box::new(CycleEffortHandler {
             session: session.clone(),
             runtime: runtime.clone(),
+        })),
+    );
+    rl.bind_sequence(
+        KeyEvent(KeyCode::F(3), Modifiers::NONE),
+        EventHandler::Conditional(Box::new(ToggleThinkingHandler {
+            session: session.clone(),
         })),
     );
 
@@ -888,7 +966,7 @@ async fn main() -> Result<()> {
     loop {
         rl.helper_mut().unwrap().input_frame = true;
         let prompt = "❯ ";
-        let input = rl.readline(&prompt);
+        let input = rl.readline(prompt);
         rl.helper_mut().unwrap().input_frame = false;
         match input {
             Ok(line) => {
@@ -906,7 +984,7 @@ async fn main() -> Result<()> {
                     continue;
                 }
                 if line == "/diff" {
-                    println!("{}", changes::diff());
+                    println!("{}", changes::diff_styled());
                     continue;
                 }
                 if line == "/undo" || line == "/undo all" {
@@ -934,36 +1012,172 @@ async fn main() -> Result<()> {
                     commands::SlashAction::Settings => {
                         let current = session.lock().unwrap().effort;
                         println!(
-                            "模型 {} · 思考强度 {} · 命令超时 {}s · 自动验证 {}",
+                            "模型 {} · 思考强度 {} · 显示思考 {} · Shell 权限 {} · 自动验证 {} · 主题 {} · 超时 {}s",
                             cfg.model,
                             current.as_str(),
+                            if tool_display::thinking_enabled() { "开" } else { "关" },
+                            if shell::raw_shell_enabled() { "开" } else { "关" },
+                            if auto_verify { "开" } else { "关" },
+                            cfg.theme.as_str(),
                             cli.command_timeout,
-                            cli.auto_verify
                         );
-                        let levels = [
-                            session::EffortLevel::Low,
-                            session::EffortLevel::Medium,
-                            session::EffortLevel::High,
-                            session::EffortLevel::Max,
-                        ];
                         match choose(
-                            "设置思考强度",
-                            &["保留当前设置", "Low", "Medium", "High", "Max"],
+                            "设置项",
+                            &[
+                                "返回",
+                                "调整思考强度 (low/medium/high/max)",
+                                "切换显示思考过程 (--show-thinking)",
+                                "切换本会话 Shell 权限 (--allow-shell)",
+                                "切换自动项目验证 (--auto-verify)",
+                                "切换面板配色主题 (none/dark/light)",
+                            ],
                         ) {
-                            Ok(0) | Err(_) => (),
-                            Ok(i) => {
-                                let mut draft = cfg.clone();
-                                draft.effort = levels[i - 1];
-                                match draft.save() {
-                                    Ok(()) => {
-                                        session.lock().unwrap().effort = draft.effort;
-                                        runtime.lock().unwrap().effort = draft.effort;
-                                        cfg = draft;
-                                        println!("已保存思考强度 {}", cfg.effort.as_str());
+                            Ok(1) => {
+                                let levels = [
+                                    session::EffortLevel::Low,
+                                    session::EffortLevel::Medium,
+                                    session::EffortLevel::High,
+                                    session::EffortLevel::Max,
+                                ];
+                                if let Ok(i) = choose(
+                                    "设置思考强度",
+                                    &["保留当前设置", "Low", "Medium", "High", "Max"],
+                                ) {
+                                    if i > 0 {
+                                        let mut draft = cfg.clone();
+                                        draft.effort = levels[i - 1];
+                                        match draft.save() {
+                                            Ok(()) => {
+                                                let mut s = session.lock().unwrap();
+                                                s.effort = draft.effort;
+                                                runtime.lock().unwrap().effort = draft.effort;
+                                                cfg = draft;
+                                                ui::emit_host_status(&s, &cfg);
+                                                println!("已保存思考强度 {}", cfg.effort.as_str());
+                                            }
+                                            Err(e) => eprintln!("保存失败: {e}"),
+                                        }
                                     }
-                                    Err(e) => eprintln!("保存失败: {e}"),
                                 }
                             }
+                            Ok(2) => {
+                                let next = !tool_display::thinking_enabled();
+                                tool_display::SHOW_THINKING
+                                    .store(next, std::sync::atomic::Ordering::Relaxed);
+                                let s = session.lock().unwrap();
+                                ui::emit_host_status(&s, &cfg);
+                                println!("显示思考过程: {}", if next { "开" } else { "关" });
+                            }
+                            Ok(3) => {
+                                let cur = shell::raw_shell_enabled();
+                                if cur {
+                                    tools::set_shell_enabled(false);
+                                    let s = session.lock().unwrap();
+                                    ui::emit_host_status(&s, &cfg);
+                                    println!("本会话 Shell 权限已关闭（恢复逐次确认）。");
+                                } else if matches!(
+                                    choose(
+                                        "开启本会话免确认 Shell 权限？模型将以当前用户权限执行任意命令",
+                                        &["取消", "确认开启（仅本次会话有效）"],
+                                    ),
+                                    Ok(1)
+                                ) {
+                                    tools::set_shell_enabled(true);
+                                    let s = session.lock().unwrap();
+                                    ui::emit_host_status(&s, &cfg);
+                                    println!("本会话 Shell 权限已开启（不写入配置文件）。");
+                                }
+                            }
+                            Ok(4) => {
+                                auto_verify = !auto_verify;
+                                println!("自动项目验证: {}", if auto_verify { "开" } else { "关" });
+                            }
+                            Ok(5) => {
+                                let themes = [
+                                    config::Theme::None,
+                                    config::Theme::Dark,
+                                    config::Theme::Light,
+                                ];
+                                if let Ok(i) = choose(
+                                    "选择面板配色主题",
+                                    &["none (终端默认)", "dark (深色面板)", "light (浅色面板)"],
+                                ) {
+                                    let mut draft = cfg.clone();
+                                    draft.theme = themes[i];
+                                    match draft.save() {
+                                        Ok(()) => {
+                                            cfg = draft;
+                                            let s = session.lock().unwrap();
+                                            ui::emit_host_status(&s, &cfg);
+                                            println!("面板主题已设为 {}", cfg.theme.as_str());
+                                        }
+                                        Err(e) => eprintln!("保存失败: {e}"),
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                        continue;
+                    }
+                    commands::SlashAction::Thinking { state } => {
+                        let next = state.unwrap_or_else(|| !tool_display::thinking_enabled());
+                        tool_display::SHOW_THINKING
+                            .store(next, std::sync::atomic::Ordering::Relaxed);
+                        let s = session.lock().unwrap();
+                        ui::emit_host_status(&s, &cfg);
+                        println!("显示思考过程: {}", if next { "开" } else { "关" });
+                        continue;
+                    }
+                    commands::SlashAction::Shell { state } => {
+                        let cur = shell::raw_shell_enabled();
+                        let next = state.unwrap_or(!cur);
+                        if !next {
+                            tools::set_shell_enabled(false);
+                            let s = session.lock().unwrap();
+                            ui::emit_host_status(&s, &cfg);
+                            println!("本会话 Shell 权限已关闭（恢复逐次确认）。");
+                        } else if cur {
+                            println!("本会话 Shell 权限已处于开启状态。");
+                        } else if matches!(
+                            choose(
+                                "开启本会话免确认 Shell 权限？模型将以当前用户权限执行任意命令",
+                                &["取消", "确认开启（仅本次会话有效）"],
+                            ),
+                            Ok(1)
+                        ) {
+                            tools::set_shell_enabled(true);
+                            let s = session.lock().unwrap();
+                            ui::emit_host_status(&s, &cfg);
+                            println!("本会话 Shell 权限已开启（不写入配置文件）。");
+                        } else {
+                            println!("已取消开启 Shell 权限。");
+                        }
+                        continue;
+                    }
+                    commands::SlashAction::Theme { name } => {
+                        match name {
+                            None => {
+                                println!(
+                                    "当前面板主题: {}（可用 /theme none|dark|light）",
+                                    cfg.theme.as_str()
+                                );
+                            }
+                            Some(raw) => match raw.parse::<config::Theme>() {
+                                Ok(t) => {
+                                    let mut draft = cfg.clone();
+                                    draft.theme = t;
+                                    match draft.save() {
+                                        Ok(()) => {
+                                            cfg = draft;
+                                            let s = session.lock().unwrap();
+                                            ui::emit_host_status(&s, &cfg);
+                                            println!("面板主题已设为 {}", cfg.theme.as_str());
+                                        }
+                                        Err(e) => eprintln!("保存失败: {e}"),
+                                    }
+                                }
+                                Err(e) => eprintln!("{e}"),
+                            },
                         }
                         continue;
                     }
@@ -1031,6 +1245,8 @@ async fn main() -> Result<()> {
                             // Reset chat histories when switching backends.
                             anthropic_messages.clear();
                             openai_messages.clear();
+                            let s = session.lock().unwrap();
+                            ui::emit_host_status(&s, &cfg);
                         }
                         continue;
                     }
@@ -1056,6 +1272,10 @@ async fn main() -> Result<()> {
                                     s.context_window = cfg.context_window;
                                 }
                                 agent.set_model(cfg.model.clone());
+                                {
+                                    let s = session.lock().unwrap();
+                                    ui::emit_host_status(&s, &cfg);
+                                }
                                 println!("model → {}", cfg.model);
                             }
                         }
@@ -1081,37 +1301,63 @@ async fn main() -> Result<()> {
                 let mut previous_feedback = None;
                 for attempt in 0..=3 {
                     let attempt_revision = changes::revision();
+                    let saved_anthropic_len = anthropic_messages.len();
+                    let saved_openai_len = openai_messages.len();
+                    let interrupted;
                     let result = match backend.as_ref().unwrap() {
                         Backend::Anthropic(c) => {
-                            run_anthropic_turn(
-                                &mut agent,
-                                c,
-                                &mut anthropic_messages,
-                                &budget,
-                                &turn_text,
-                                &session,
-                            )
-                            .await
+                            tokio::select! {
+                                res = run_anthropic_turn(
+                                    &mut agent,
+                                    c,
+                                    &mut anthropic_messages,
+                                    &budget,
+                                    &turn_text,
+                                    &session,
+                                ) => {
+                                    interrupted = false;
+                                    res
+                                }
+                                _ = tokio::signal::ctrl_c() => {
+                                    interrupted = true;
+                                    Ok(())
+                                }
+                            }
                         }
                         Backend::OpenAi { client: c, .. } => {
-                            run_openai_turn(
-                                c,
-                                &cfg.model,
-                                &cwd,
-                                &mut openai_messages,
-                                &turn_text,
-                                max_tokens,
-                                &session,
-                            )
-                            .await
+                            tokio::select! {
+                                res = run_openai_turn(
+                                    c,
+                                    &cfg.model,
+                                    &cwd,
+                                    &mut openai_messages,
+                                    &turn_text,
+                                    max_tokens,
+                                    &session,
+                                ) => {
+                                    interrupted = false;
+                                    res
+                                }
+                                _ = tokio::signal::ctrl_c() => {
+                                    interrupted = true;
+                                    Ok(())
+                                }
+                            }
                         }
                     };
+                    if interrupted {
+                        anthropic_messages.truncate(saved_anthropic_len);
+                        openai_messages.truncate(saved_openai_len);
+                        eprintln!("\n(已中断本轮请求)");
+                        break;
+                    }
                     if let Err(err) = result {
                         eprintln!("错误: {err:#}");
                         break;
                     } else {
                         let s = session.lock().unwrap();
                         ui::print_turn_footer(&s, &cfg);
+                        ui::emit_host_status(&s, &cfg);
                     }
                     let now = changes::dirty_files(&cwd);
                     let external = changes::changed_paths(&previous_files, &now);
@@ -1122,7 +1368,7 @@ async fn main() -> Result<()> {
                         }
                         break;
                     }
-                    if !cli.auto_verify {
+                    if !auto_verify {
                         println!("Verification: not run automatically");
                         break;
                     }

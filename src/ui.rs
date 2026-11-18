@@ -3,7 +3,7 @@
 use crate::config::Config;
 use crate::session::SessionState;
 
-fn color_enabled() -> bool {
+pub fn color_enabled() -> bool {
     // NO_COLOR disables ANSI styling only when set to a non-empty value.
     // An empty value is equivalent to leaving the variable unset.
     !no_color_disables(std::env::var_os("NO_COLOR").as_deref())
@@ -333,9 +333,13 @@ pub fn print_help_panel() {
             "\
 /login            选服务商 / Key / URL / 模型（价格与上下文自动填写）
 /model [name]     查看或切换模型
-/settings         查看设置、调整思考强度（也可用 /setting）
+/settings         交互式调整思考强度、思考显示、Shell 权限与自动验证
+/thinking [on|off] 运行时开启/关闭思考过程显示（快捷键 F3）
+/shell [on|off]   本会话开启/关闭免确认 Shell 权限（快捷键 F4）
+/theme [dark|light|none] 切换面板配色主题
 /usage            当前会话 token 用量
 /history [ID]     列出项目归档（含自动主题）或查看记录
+/diff / /undo     查看文件工具改动 diff / 回退改动
 /status           状态
 /clear            清空对话（用量保留）
 /help  /exit      帮助 / 退出
@@ -358,8 +362,73 @@ fn effort_color(effort: crate::session::EffortLevel) -> &'static str {
         crate::session::EffortLevel::Max => "31",
     }
 }
+#[allow(dead_code)]
 pub fn color_prompt(text: &str) -> String {
     c(ACCENT, text)
+}
+
+pub fn color_prompt_for_effort(text: &str, effort: crate::session::EffortLevel) -> String {
+    c(effort_color(effort), text)
+}
+
+fn sanitize_osc(s: &str) -> String {
+    s.chars()
+        .map(|ch| {
+            if ch == ';' || ch == '\x07' || ch == '\x1b' || ch.is_control() {
+                ' '
+            } else {
+                ch
+            }
+        })
+        .collect()
+}
+
+pub fn emit_host_status(session: &SessionState, cfg: &Config) {
+    if std::env::var_os("ORIGINAL_AGENT_HOST").is_none() {
+        return;
+    }
+    use std::io::Write;
+    let model = if session.logged_in && !session.model.is_empty() {
+        session.model.as_str()
+    } else {
+        "未登录"
+    };
+    let ctx = if session.usage.last_context_tokens == 0 {
+        String::new()
+    } else {
+        let win = session.context_window.max(1) as u64;
+        format!(
+            "{:.0}%",
+            (session.usage.last_context_tokens as f64 / win as f64) * 100.0
+        )
+    };
+    let cost = match cfg.estimate_cost_usd(&session.usage) {
+        Some(v) if session.usage.turns > 0 => format!("~${v:.3}"),
+        _ => String::new(),
+    };
+    let shell = if crate::shell::raw_shell_enabled() {
+        "1"
+    } else {
+        "0"
+    };
+    let thinking = if crate::tool_display::thinking_enabled() {
+        "1"
+    } else {
+        "0"
+    };
+    let logged_in = if session.logged_in { "1" } else { "0" };
+    print!(
+        "\x1b]7700;model={};effort={};shell={};thinking={};logged_in={};ctx={};cost={};theme={}\x07",
+        sanitize_osc(model),
+        session.effort.as_str(),
+        shell,
+        thinking,
+        logged_in,
+        sanitize_osc(&ctx),
+        sanitize_osc(&cost),
+        cfg.theme.as_str(),
+    );
+    let _ = std::io::stdout().flush();
 }
 
 pub fn set_window_title() {

@@ -5,9 +5,14 @@
 use anyhow::Result;
 use crossterm::{
     cursor,
-    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
+    event::{
+        self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEventKind,
+        KeyModifiers,
+    },
     execute, queue,
-    style::{Color, Print, ResetColor, SetForegroundColor},
+    style::{
+        Attribute, Color, Print, ResetColor, SetAttribute, SetBackgroundColor, SetForegroundColor,
+    },
     terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, SetTitle},
 };
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
@@ -18,6 +23,9 @@ use std::{
     sync::mpsc,
     time::Duration,
 };
+
+use crate::config::Theme;
+use crate::session::EffortLevel;
 
 const SIDEBAR_WIDTH: u16 = 28;
 const SIDEBAR_MIN_COLUMNS: u16 = 110;
@@ -38,7 +46,12 @@ impl Drop for Restore {
         if !self.previous_title.is_empty() {
             let _ = execute!(stdout, SetTitle(self.previous_title.as_str()));
         }
-        let _ = execute!(stdout, LeaveAlternateScreen, cursor::Show);
+        let _ = execute!(
+            stdout,
+            DisableBracketedPaste,
+            LeaveAlternateScreen,
+            cursor::Show
+        );
     }
 }
 
@@ -55,38 +68,156 @@ fn current_title() -> String {
     String::new()
 }
 
-fn sidebar_status_lines() -> Vec<String> {
-    match crate::config::Config::load() {
-        Ok(cfg) if !cfg.model.trim().is_empty() => {
-            vec![cfg.model.clone(), cfg.effort.as_str().to_string()]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HostStatus {
+    model: String,
+    effort: EffortLevel,
+    shell_enabled: bool,
+    show_thinking: bool,
+    logged_in: bool,
+    ctx: String,
+    cost: String,
+    theme: Theme,
+}
+
+impl HostStatus {
+    fn from_config() -> Self {
+        let allow_shell = std::env::args_os().any(|a| a == "--allow-shell");
+        let show_thinking = std::env::args_os().any(|a| a == "--show-thinking");
+        match crate::config::Config::load() {
+            Ok(cfg) => Self {
+                logged_in: !cfg.model.trim().is_empty(),
+                model: if cfg.model.trim().is_empty() {
+                    "未登录".into()
+                } else {
+                    cfg.model
+                },
+                effort: cfg.effort,
+                shell_enabled: allow_shell,
+                show_thinking,
+                ctx: String::new(),
+                cost: String::new(),
+                theme: cfg.theme,
+            },
+            Err(_) => Self {
+                model: "未登录".into(),
+                effort: EffortLevel::Medium,
+                shell_enabled: allow_shell,
+                show_thinking,
+                logged_in: false,
+                ctx: String::new(),
+                cost: String::new(),
+                theme: Theme::None,
+            },
         }
-        _ => vec!["未登录".into()],
+    }
+
+    fn apply_osc(&mut self, payload: &str) -> bool {
+        let prev = self.clone();
+        for part in payload.split(';') {
+            let Some((k, v)) = part.split_once('=') else {
+                continue;
+            };
+            match k {
+                "model" => self.model = v.to_string(),
+                "effort" => {
+                    if let Ok(e) = v.parse::<EffortLevel>() {
+                        self.effort = e;
+                    }
+                }
+                "shell" => self.shell_enabled = v == "1" || v == "true",
+                "thinking" => self.show_thinking = v == "1" || v == "true",
+                "logged_in" => self.logged_in = v == "1" || v == "true",
+                "ctx" => self.ctx = v.to_string(),
+                "cost" => self.cost = v.to_string(),
+                "theme" => {
+                    if let Ok(t) = v.parse::<Theme>() {
+                        self.theme = t;
+                    }
+                }
+                _ => {}
+            }
+        }
+        *self != prev
     }
 }
 
-struct CachedSidebarStatus {
-    last_mtime: Option<std::time::SystemTime>,
-    lines: Vec<String>,
+/// Streaming byte filter that intercepts `ESC ] 7700 ; ... BEL/ST` sequences
+/// across arbitrary PTY read boundaries without disturbing other bytes.
+#[derive(Default)]
+struct OscFilter {
+    buf: Vec<u8>,
+    in_osc: bool,
+    saw_esc: bool,
 }
 
-impl CachedSidebarStatus {
-    fn new() -> Self {
-        Self {
-            last_mtime: None,
-            lines: sidebar_status_lines(),
+impl OscFilter {
+    fn process(&mut self, input: &[u8]) -> (Vec<u8>, Vec<String>) {
+        let mut out = Vec::with_capacity(input.len());
+        let mut events = Vec::new();
+
+        for &b in input {
+            if self.in_osc {
+                if self.saw_esc {
+                    self.saw_esc = false;
+                    if b == b'\\' {
+                        // ST terminator (\x1b\\)
+                        self.finish_osc(&mut out, &mut events);
+                        continue;
+                    }
+                    // False alarm inside OSC
+                    self.buf.push(0x1b);
+                }
+                if b == 0x07 {
+                    self.finish_osc(&mut out, &mut events);
+                } else if b == 0x1b {
+                    self.saw_esc = true;
+                } else if self.buf.len() < 4096 {
+                    self.buf.push(b);
+                } else {
+                    // Too long, abort and flush as normal bytes
+                    out.extend_from_slice(&self.buf);
+                    out.push(b);
+                    self.buf.clear();
+                    self.in_osc = false;
+                }
+                continue;
+            }
+
+            if self.saw_esc {
+                self.saw_esc = false;
+                if b == b']' {
+                    self.in_osc = true;
+                    self.buf.clear();
+                    self.buf.extend_from_slice(b"\x1b]");
+                    continue;
+                }
+                out.push(0x1b);
+                out.push(b);
+                continue;
+            }
+
+            if b == 0x1b {
+                self.saw_esc = true;
+            } else {
+                out.push(b);
+            }
         }
+
+        (out, events)
     }
 
-    fn get(&mut self) -> &[String] {
-        let mtime = crate::config::Config::config_path()
-            .ok()
-            .and_then(|p| std::fs::metadata(p).ok())
-            .and_then(|m| m.modified().ok());
-        if mtime != self.last_mtime {
-            self.last_mtime = mtime;
-            self.lines = sidebar_status_lines();
+    fn finish_osc(&mut self, out: &mut Vec<u8>, events: &mut Vec<String>) {
+        self.in_osc = false;
+        if let Some(payload) = self.buf.strip_prefix(b"\x1b]7700;") {
+            if let Ok(s) = std::str::from_utf8(payload) {
+                events.push(s.to_string());
+            }
+        } else {
+            out.extend_from_slice(&self.buf);
+            out.push(0x07);
         }
-        &self.lines
+        self.buf.clear();
     }
 }
 
@@ -98,6 +229,14 @@ fn layout(columns: u16) -> u16 {
     }
 }
 
+fn char_display_width(c: char) -> usize {
+    if c.is_ascii() || matches!(c, '─' | '│' | '·' | '…' | '◆' | '●' | '⚠' | '↑') {
+        1
+    } else {
+        2
+    }
+}
+
 fn fit(text: &str, width: usize) -> String {
     if width == 0 {
         return String::new();
@@ -105,7 +244,7 @@ fn fit(text: &str, width: usize) -> String {
     let mut out = String::new();
     let mut used = 0;
     for c in text.chars().filter(|c| !c.is_control()) {
-        let w = if c.is_ascii() { 1 } else { 2 };
+        let w = char_display_width(c);
         if used + w > width {
             break;
         }
@@ -127,6 +266,11 @@ fn forwarded_args() -> Vec<OsString> {
 }
 
 fn key_bytes(key: event::KeyEvent) -> Option<String> {
+    if key.modifiers.contains(KeyModifiers::ALT) {
+        if let KeyCode::Char(c) = key.code {
+            return Some(format!("\x1b{c}"));
+        }
+    }
     Some(match key.code {
         KeyCode::Char(c)
             if key.modifiers.contains(KeyModifiers::CONTROL) && c.is_ascii_alphabetic() =>
@@ -145,32 +289,86 @@ fn key_bytes(key: event::KeyEvent) -> Option<String> {
         KeyCode::Left => "\x1b[D".into(),
         KeyCode::Home => "\x1b[H".into(),
         KeyCode::End => "\x1b[F".into(),
+        KeyCode::Insert => "\x1b[2~".into(),
         KeyCode::Delete => "\x1b[3~".into(),
+        KeyCode::F(1) => "\x1bOP".into(),
+        KeyCode::F(2) => "\x1bOQ".into(),
+        KeyCode::F(3) => "\x1bOR".into(),
+        KeyCode::F(4) => "\x1bOS".into(),
+        KeyCode::F(5) => "\x1b[15~".into(),
+        KeyCode::F(6) => "\x1b[17~".into(),
+        KeyCode::F(7) => "\x1b[18~".into(),
+        KeyCode::F(8) => "\x1b[19~".into(),
+        KeyCode::F(9) => "\x1b[20~".into(),
         _ => return None,
     })
+}
+
+fn panel_bg(theme: Theme) -> Option<Color> {
+    if !crate::ui::color_enabled() {
+        return None;
+    }
+    match theme {
+        Theme::None => None,
+        Theme::Dark => Some(Color::AnsiValue(235)),
+        Theme::Light => Some(Color::AnsiValue(254)),
+    }
+}
+
+fn effort_badge_colors(effort: EffortLevel) -> (Color, Color) {
+    match effort {
+        EffortLevel::Low => (Color::AnsiValue(240), Color::AnsiValue(255)),
+        EffortLevel::Medium => (Color::AnsiValue(28), Color::AnsiValue(255)),
+        EffortLevel::High => (Color::AnsiValue(172), Color::AnsiValue(16)),
+        EffortLevel::Max => (Color::AnsiValue(196), Color::AnsiValue(255)),
+    }
+}
+
+fn effort_fg_color(effort: EffortLevel) -> Color {
+    match effort {
+        EffortLevel::Low => Color::AnsiValue(250),
+        EffortLevel::Medium => Color::AnsiValue(77),
+        EffortLevel::High => Color::AnsiValue(214),
+        EffortLevel::Max => Color::AnsiValue(197),
+    }
 }
 
 fn draw_sidebar(
     out: &mut impl Write,
     width: u16,
-    rows: u16,
+    pty_rows: u16,
     columns: u16,
     listing: &str,
-    status: &[String],
+    status: &HostStatus,
 ) -> Result<()> {
     queue!(out, ResetColor)?;
     if columns < SIDEBAR_MIN_COLUMNS {
         return Ok(());
     }
+    let styled = crate::ui::color_enabled();
+    let bg = panel_bg(status.theme);
     let text_width = SIDEBAR_WIDTH.saturating_sub(1) as usize;
-    let mut lines: Vec<(Color, String)> = vec![(SIDEBAR_TITLE, "original".into())];
-    lines.extend(status.iter().map(|line| (SIDEBAR_FG, line.clone())));
+    let effort_label = format!(
+        "● {}{}",
+        status.effort.as_str().to_ascii_uppercase(),
+        match (status.shell_enabled, status.show_thinking) {
+            (true, true) => " · SHELL · THINK",
+            (true, false) => " · SHELL",
+            (false, true) => " · THINK",
+            (false, false) => "",
+        }
+    );
+    let mut lines: Vec<(Color, String)> = vec![
+        (SIDEBAR_TITLE, "original".into()),
+        (SIDEBAR_FG, status.model.clone()),
+        (effort_fg_color(status.effort), effort_label),
+    ];
     lines.push((SIDEBAR_RULE, "─".repeat(text_width)));
     lines.push((SIDEBAR_TITLE, "Sessions".into()));
     lines.extend(
         listing
             .lines()
-            .take(rows.saturating_sub(9) as usize)
+            .take(pty_rows.saturating_sub(10) as usize)
             .map(|line| (SIDEBAR_FG, line.to_string())),
     );
     let hints = [
@@ -179,34 +377,206 @@ fn draw_sidebar(
         "F10: exit",
         "PgUp/PgDn: scroll",
     ];
-    for y in 0..rows {
-        let (color, text) = if y + 4 >= rows {
-            (SIDEBAR_RULE, hints[(y + 4 - rows) as usize].to_string())
+    for y in 0..pty_rows {
+        let (color, text) = if y + 4 >= pty_rows {
+            (SIDEBAR_RULE, hints[(y + 4 - pty_rows) as usize].to_string())
         } else {
             lines
                 .get(y as usize)
                 .cloned()
                 .unwrap_or((SIDEBAR_FG, String::new()))
         };
+        queue!(out, cursor::MoveTo(width, y), ResetColor)?;
+        if let Some(bg_col) = bg {
+            queue!(out, SetBackgroundColor(bg_col))?;
+        }
+        if styled {
+            queue!(
+                out,
+                SetForegroundColor(SIDEBAR_RULE),
+                Print("│"),
+                SetForegroundColor(color),
+                Print(fit(&text, text_width)),
+                ResetColor
+            )?;
+        } else {
+            queue!(out, Print("│"), Print(fit(&text, text_width)))?;
+        }
+    }
+    Ok(())
+}
+
+struct BadgeStyle {
+    styled: bool,
+    bar_bg: Color,
+    bg: Color,
+    fg: Color,
+    bold: bool,
+}
+
+fn emit_status_badge<W: Write>(
+    out: &mut W,
+    used: &mut usize,
+    max_cols: usize,
+    text: &str,
+    style: BadgeStyle,
+) -> Result<()> {
+    let w: usize = text.chars().map(char_display_width).sum();
+    if *used + w > max_cols {
+        return Ok(());
+    }
+    if style.styled {
         queue!(
             out,
-            cursor::MoveTo(width, y),
-            ResetColor,
-            SetForegroundColor(SIDEBAR_RULE),
-            Print("│"),
-            SetForegroundColor(color),
-            Print(fit(&text, text_width)),
-            ResetColor
+            SetBackgroundColor(style.bg),
+            SetForegroundColor(style.fg)
+        )?;
+        if style.bold {
+            queue!(out, SetAttribute(Attribute::Bold))?;
+        }
+        queue!(
+            out,
+            Print(text),
+            SetAttribute(Attribute::Reset),
+            SetBackgroundColor(style.bar_bg)
+        )?;
+    } else {
+        queue!(out, Print(text))?;
+    }
+    *used += w;
+    Ok(())
+}
+
+fn draw_status_bar(
+    out: &mut impl Write,
+    rows: u16,
+    columns: u16,
+    status: &HostStatus,
+    scrollback: usize,
+) -> Result<()> {
+    if rows == 0 || columns == 0 {
+        return Ok(());
+    }
+    let y = rows - 1;
+    let styled = crate::ui::color_enabled();
+    let bar_bg = panel_bg(status.theme).unwrap_or(Color::AnsiValue(236));
+
+    queue!(out, cursor::MoveTo(0, y), ResetColor)?;
+    if styled {
+        queue!(out, SetBackgroundColor(bar_bg))?;
+    }
+
+    let mut used = 0usize;
+    let max_cols = columns as usize;
+
+    let (eff_bg, eff_fg) = effort_badge_colors(status.effort);
+    let eff_text = if styled {
+        format!(" ● {} ", status.effort.as_str().to_ascii_uppercase())
+    } else {
+        format!("[{}]", status.effort.as_str().to_ascii_uppercase())
+    };
+    emit_status_badge(
+        out,
+        &mut used,
+        max_cols,
+        &eff_text,
+        BadgeStyle {
+            styled,
+            bar_bg,
+            bg: eff_bg,
+            fg: eff_fg,
+            bold: true,
+        },
+    )?;
+
+    if status.shell_enabled {
+        emit_status_badge(
+            out,
+            &mut used,
+            max_cols,
+            " ⚠ SHELL ",
+            BadgeStyle {
+                styled,
+                bar_bg,
+                bg: Color::AnsiValue(160),
+                fg: Color::AnsiValue(255),
+                bold: true,
+            },
         )?;
     }
+    if status.show_thinking {
+        emit_status_badge(
+            out,
+            &mut used,
+            max_cols,
+            " THINK ",
+            BadgeStyle {
+                styled,
+                bar_bg,
+                bg: Color::AnsiValue(31),
+                fg: Color::AnsiValue(255),
+                bold: false,
+            },
+        )?;
+    }
+    if scrollback > 0 {
+        emit_status_badge(
+            out,
+            &mut used,
+            max_cols,
+            &format!(" ↑ 回看({scrollback}) "),
+            BadgeStyle {
+                styled,
+                bar_bg,
+                bg: Color::AnsiValue(99),
+                fg: Color::AnsiValue(255),
+                bold: true,
+            },
+        )?;
+    }
+
+    let mut meta_parts = vec![status.model.clone()];
+    if !status.ctx.is_empty() {
+        meta_parts.push(format!("ctx {}", status.ctx));
+    }
+    if !status.cost.is_empty() {
+        meta_parts.push(status.cost.clone());
+    }
+    let meta = format!("  {}", meta_parts.join(" · "));
+    let hints = "Shift+Tab 强度 · F3 思考 · F4 Shell · /help ";
+
+    let remaining = max_cols.saturating_sub(used);
+    let hints_w: usize = hints.chars().map(char_display_width).sum();
+    let meta_w: usize = meta.chars().map(char_display_width).sum();
+
+    if remaining > 0 {
+        if styled {
+            queue!(out, SetForegroundColor(Color::AnsiValue(250)))?;
+        }
+        if remaining >= meta_w + hints_w + 2 {
+            queue!(out, Print(&meta))?;
+            let pad = remaining - meta_w - hints_w;
+            if pad > 0 {
+                queue!(out, Print(" ".repeat(pad)))?;
+            }
+            if styled {
+                queue!(out, SetForegroundColor(Color::AnsiValue(243)))?;
+            }
+            queue!(out, Print(hints))?;
+        } else {
+            queue!(out, Print(fit(&meta, remaining)))?;
+        }
+    }
+    queue!(out, ResetColor)?;
     Ok(())
 }
 
 pub fn run(root: &Path) -> Result<()> {
     let (columns, rows) = terminal::size()?;
     let mut width = layout(columns);
+    let mut pty_rows = rows.saturating_sub(1).max(1);
     let pair = native_pty_system().openpty(PtySize {
-        rows: rows.max(1),
+        rows: pty_rows,
         cols: width,
         pixel_width: 0,
         pixel_height: 0,
@@ -229,7 +599,27 @@ pub fn run(root: &Path) -> Result<()> {
             }
         }
     });
-    let mut parser = vt100::Parser::new(rows.max(1), width, 5000);
+
+    // Background thread for session archive listing so drawing never blocks on disk I/O.
+    let (listing_tx, listing_rx) = mpsc::channel::<String>();
+    let root_bg = root.to_path_buf();
+    std::thread::spawn(move || {
+        let mut last = String::new();
+        loop {
+            let next = crate::archive::command("/sessions", &root_bg)
+                .and_then(|r| r.ok())
+                .unwrap_or_default();
+            if next != last {
+                last = next.clone();
+                if listing_tx.send(next).is_err() {
+                    break;
+                }
+            }
+            std::thread::sleep(Duration::from_secs(3));
+        }
+    });
+
+    let mut parser = vt100::Parser::new(pty_rows, width, 5000);
     terminal::enable_raw_mode()?;
     let _restore = Restore {
         previous_title: current_title(),
@@ -237,55 +627,120 @@ pub fn run(root: &Path) -> Result<()> {
     execute!(
         std::io::stdout(),
         EnterAlternateScreen,
+        EnableBracketedPaste,
         Clear(ClearType::All),
         cursor::Show,
         SetTitle("original")
     )?;
     let result = (|| -> Result<()> {
         let mut dirty = true;
+        let mut full_redraw = true;
+        let mut chrome_dirty = true;
         let mut listing = String::new();
-        let mut status_cache = CachedSidebarStatus::new();
-        let mut refreshed = std::time::Instant::now() - Duration::from_secs(3);
+        let mut host_status = HostStatus::from_config();
+        let mut osc_filter = OscFilter::default();
+        let mut prev_screen: Option<vt100::Screen> = None;
+        let mut last_draw = std::time::Instant::now() - Duration::from_millis(50);
+
         loop {
             while let Ok(data) = receive.try_recv() {
-                parser.process(&data);
-                dirty = true;
-            }
-            if dirty {
-                let (columns, rows) = terminal::size()?;
-                let mut out = std::io::stdout().lock();
-                out.write_all(&parser.screen().contents_formatted())?;
-                queue!(out, ResetColor, SetTitle("original"))?;
-                let status = status_cache.get();
-                if refreshed.elapsed() >= Duration::from_secs(2) {
-                    listing = crate::archive::command("/sessions", root)
-                        .and_then(|r| r.ok())
-                        .unwrap_or_default();
-                    refreshed = std::time::Instant::now();
+                let (clean, osc_events) = osc_filter.process(&data);
+                if !clean.is_empty() {
+                    parser.process(&clean);
+                    dirty = true;
                 }
-                draw_sidebar(&mut out, width, rows, columns, &listing, status)?;
-                let (row, col) = parser.screen().cursor_position();
-                queue!(out, cursor::MoveTo(col, row))?;
+                for ev in osc_events {
+                    if host_status.apply_osc(&ev) {
+                        chrome_dirty = true;
+                        dirty = true;
+                    }
+                }
+            }
+            while let Ok(next_listing) = listing_rx.try_recv() {
+                if next_listing != listing {
+                    listing = next_listing;
+                    chrome_dirty = true;
+                    dirty = true;
+                }
+            }
+
+            if dirty && (full_redraw || last_draw.elapsed() >= Duration::from_millis(16)) {
+                let (columns, rows) = terminal::size()?;
+                pty_rows = rows.saturating_sub(1).max(1);
+                let mut out = std::io::stdout().lock();
+                // Synchronized output avoids tearing/flicker on modern terminals.
+                out.write_all(b"\x1b[?2026h")?;
+                if full_redraw || prev_screen.is_none() {
+                    out.write_all(&parser.screen().contents_formatted())?;
+                    chrome_dirty = true;
+                } else if let Some(prev) = &prev_screen {
+                    let diff = parser.screen().contents_diff(prev);
+                    if !diff.is_empty() {
+                        out.write_all(&diff)?;
+                    }
+                }
+                queue!(out, ResetColor, SetTitle("original"))?;
+                if chrome_dirty {
+                    draw_sidebar(&mut out, width, pty_rows, columns, &listing, &host_status)?;
+                    draw_status_bar(
+                        &mut out,
+                        rows,
+                        columns,
+                        &host_status,
+                        parser.screen().scrollback(),
+                    )?;
+                    chrome_dirty = false;
+                }
+                if parser.screen().scrollback() > 0 {
+                    queue!(out, cursor::Hide)?;
+                } else {
+                    let (row, col) = parser.screen().cursor_position();
+                    queue!(
+                        out,
+                        cursor::MoveTo(col, row.min(pty_rows.saturating_sub(1))),
+                        cursor::Show
+                    )?;
+                }
+                out.write_all(b"\x1b[?2026l")?;
                 out.flush()?;
+                prev_screen = Some(parser.screen().clone());
+                full_redraw = false;
                 dirty = false;
+                last_draw = std::time::Instant::now();
             }
             if child.try_wait()?.is_some() {
                 break;
             }
-            if !event::poll(Duration::from_millis(30))? {
+            let wait = if dirty {
+                Duration::from_millis(8)
+            } else {
+                Duration::from_millis(30)
+            };
+            if !event::poll(wait)? {
                 continue;
             }
             match event::read()? {
                 Event::Resize(columns, rows) => {
                     width = layout(columns);
+                    pty_rows = rows.saturating_sub(1).max(1);
                     pair.master.resize(PtySize {
-                        rows: rows.max(1),
+                        rows: pty_rows,
                         cols: width,
                         pixel_width: 0,
                         pixel_height: 0,
                     })?;
-                    parser.set_size(rows.max(1), width);
-                    execute!(std::io::stdout(), Clear(ClearType::All))?;
+                    parser.set_size(pty_rows, width);
+                    prev_screen = None;
+                    full_redraw = true;
+                    chrome_dirty = true;
+                    dirty = true;
+                }
+                Event::Paste(text) => {
+                    parser.set_scrollback(0);
+                    let framed = format!("\x1b[200~{text}\x1b[201~");
+                    writer.write_all(framed.as_bytes())?;
+                    writer.flush()?;
+                    chrome_dirty = true;
                     dirty = true;
                 }
                 Event::Key(key) if key.kind != KeyEventKind::Release => {
@@ -299,10 +754,14 @@ pub fn run(root: &Path) -> Result<()> {
                         } else {
                             offset.saturating_sub(SCROLL_STEP)
                         });
+                        chrome_dirty = true;
                         dirty = true;
                         continue;
                     }
-                    parser.set_scrollback(0);
+                    if parser.screen().scrollback() > 0 {
+                        parser.set_scrollback(0);
+                        chrome_dirty = true;
+                    }
                     if let Some(text) = key_bytes(key) {
                         writer.write_all(text.as_bytes())?;
                         writer.flush()?;
@@ -344,6 +803,7 @@ mod tests {
         assert_eq!(fit("abc", 5), "abc  ");
         assert_eq!(fit("会话记录AB", 6), "会话记");
         assert_eq!(fit("ok\u{07}!", 4), "ok! ");
+        assert_eq!(fit("───", 3), "───");
     }
 
     #[test]
@@ -353,5 +813,22 @@ mod tests {
         assert_eq!(fit(&status[1], 27).trim(), "high");
         let squeezed = fit("claude-sonnet-4-5-20250929 · high", 27);
         assert!(!squeezed.contains("high"), "{squeezed}");
+    }
+
+    #[test]
+    fn osc_filter_extracts_split_status_frames() {
+        let mut f = OscFilter::default();
+        let (out1, ev1) = f.process(b"hello\x1b]7700;model=gpt-4.1;");
+        let (out2, ev2) = f.process(b"effort=high;shell=1\x07world");
+        assert_eq!(out1, b"hello");
+        assert!(ev1.is_empty());
+        assert_eq!(out2, b"world");
+        assert_eq!(ev2, vec!["model=gpt-4.1;effort=high;shell=1"]);
+
+        let mut status = HostStatus::from_config();
+        assert!(status.apply_osc(&ev2[0]));
+        assert_eq!(status.model, "gpt-4.1");
+        assert_eq!(status.effort, EffortLevel::High);
+        assert!(status.shell_enabled);
     }
 }

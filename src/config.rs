@@ -16,6 +16,43 @@ pub const DEFAULT_MAX_TOKENS: u32 = 8192;
 pub const DEFAULT_BUDGET_TOKENS: u32 = 200_000;
 pub const DEFAULT_CONTEXT_WINDOW: u32 = 200_000;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    #[default]
+    None,
+    Dark,
+    Light,
+}
+
+impl Theme {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Dark => "dark",
+            Self::Light => "light",
+        }
+    }
+}
+
+impl std::fmt::Display for Theme {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for Theme {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "none" | "default" => Ok(Self::None),
+            "dark" => Ok(Self::Dark),
+            "light" => Ok(Self::Light),
+            other => Err(format!("未知主题: {other}（可用 none|dark|light）")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Pricing {
     /// USD per 1M input tokens.
@@ -53,6 +90,8 @@ pub struct Config {
     pub local_model_path: Option<String>,
     #[serde(default)]
     pub pricing: Pricing,
+    #[serde(default)]
+    pub theme: Theme,
 }
 
 fn default_model() -> String {
@@ -85,6 +124,7 @@ impl Default for Config {
             context_window: DEFAULT_CONTEXT_WINDOW,
             local_model_path: None,
             pricing: Pricing::default(),
+            theme: Theme::None,
         }
     }
 }

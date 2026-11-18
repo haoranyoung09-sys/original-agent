@@ -28,15 +28,33 @@ fn approve(command: &str, cwd: &PathBuf) -> bool {
     }
     let _guard = APPROVAL.lock().unwrap();
     eprintln!(
-        "执行目录 {:?}\n命令 {:?}\n仅允许这一次？[y/N]",
+        "执行目录 {:?}\n命令 {:?}\n允许执行？[y=仅本次 / a=本会话总是允许 / N=拒绝]",
         cwd, command
     );
     let mut answer = String::new();
-    std::io::stdin().read_line(&mut answer).is_ok()
-        && matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+    if std::io::stdin().read_line(&mut answer).is_err() {
+        return false;
+    }
+    match answer.trim().to_ascii_lowercase().as_str() {
+        "y" | "yes" => true,
+        "a" | "always" => {
+            set_shell_enabled(true);
+            if std::env::var_os("ORIGINAL_AGENT_HOST").is_some() {
+                use std::io::Write;
+                print!("\x1b]7700;shell=1\x07");
+                let _ = std::io::stdout().flush();
+            }
+            true
+        }
+        _ => false,
+    }
 }
 pub fn set_shell_enabled(enabled: bool) {
     SHELL_ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+pub fn raw_shell_enabled() -> bool {
+    SHELL_ENABLED.load(Ordering::Relaxed)
 }
 
 pub fn shell_enabled() -> bool {

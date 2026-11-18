@@ -9,6 +9,15 @@ pub enum SlashAction {
     Settings,
     Usage,
     Login,
+    Thinking {
+        state: Option<bool>,
+    },
+    Shell {
+        state: Option<bool>,
+    },
+    Theme {
+        name: Option<String>,
+    },
     /// `None` means show current model; `Some(name)` switches.
     Model {
         name: Option<String>,
@@ -16,6 +25,35 @@ pub enum SlashAction {
     Unknown(String),
     /// Not a slash command — treat as chat/user text.
     NotSlash,
+}
+
+/// Known slash commands for completion and hinting.
+pub const SLASH_COMMANDS: &[&str] = &[
+    "/login",
+    "/model",
+    "/settings",
+    "/thinking",
+    "/shell",
+    "/theme",
+    "/status",
+    "/usage",
+    "/history",
+    "/sessions",
+    "/export",
+    "/diff",
+    "/undo",
+    "/clear",
+    "/help",
+    "/exit",
+    "/quit",
+];
+
+fn parse_toggle_arg(rest: &str) -> Option<bool> {
+    match rest.trim().to_ascii_lowercase().as_str() {
+        "on" | "1" | "true" | "enable" => Some(true),
+        "off" | "0" | "false" | "disable" => Some(false),
+        _ => None,
+    }
 }
 
 /// Parse a trimmed REPL line into a slash action.
@@ -36,6 +74,19 @@ pub fn parse_slash(line: &str) -> SlashAction {
         "/usage" => SlashAction::Usage,
         "/status" => SlashAction::Status,
         "/login" => SlashAction::Login,
+        "/thinking" => SlashAction::Thinking {
+            state: parse_toggle_arg(rest),
+        },
+        "/shell" => SlashAction::Shell {
+            state: parse_toggle_arg(rest),
+        },
+        "/theme" => SlashAction::Theme {
+            name: if rest.is_empty() {
+                None
+            } else {
+                Some(rest.to_string())
+            },
+        },
         "/model" => {
             if rest.is_empty() {
                 SlashAction::Model { name: None }
@@ -67,6 +118,24 @@ mod tests {
         assert_eq!(parse_slash("/status"), SlashAction::Status);
         assert_eq!(parse_slash("/login"), SlashAction::Login);
         assert_eq!(parse_slash("/login extra"), SlashAction::Login);
+        assert_eq!(
+            parse_slash("/thinking"),
+            SlashAction::Thinking { state: None }
+        );
+        assert_eq!(
+            parse_slash("/thinking on"),
+            SlashAction::Thinking { state: Some(true) }
+        );
+        assert_eq!(
+            parse_slash("/shell off"),
+            SlashAction::Shell { state: Some(false) }
+        );
+        assert_eq!(
+            parse_slash("/theme dark"),
+            SlashAction::Theme {
+                name: Some("dark".into())
+            }
+        );
         assert_eq!(parse_slash("/model"), SlashAction::Model { name: None });
         assert_eq!(
             parse_slash("/model gpt-4.1"),
