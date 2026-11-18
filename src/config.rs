@@ -50,6 +50,8 @@ pub struct Config {
     #[serde(default = "default_context_window")]
     pub context_window: u32,
     #[serde(default)]
+    pub local_model_path: Option<String>,
+    #[serde(default)]
     pub pricing: Pricing,
 }
 
@@ -81,6 +83,7 @@ impl Default for Config {
             max_tokens: DEFAULT_MAX_TOKENS,
             budget_tokens: DEFAULT_BUDGET_TOKENS,
             context_window: DEFAULT_CONTEXT_WINDOW,
+            local_model_path: None,
             pricing: Pricing::default(),
         }
     }
@@ -222,6 +225,15 @@ impl Config {
                 .map(|k| k.trim().to_string())
                 .filter(|k| !k.is_empty())
         })
+    }
+
+    pub fn is_local_ready(&self) -> bool {
+        self.provider == ProviderId::Local
+            && !self.model.trim().is_empty()
+            && self
+                .local_model_path
+                .as_deref()
+                .is_some_and(|p| !p.trim().is_empty())
     }
 
     pub fn estimate_cost_usd(&self, stats: &crate::session::UsageStats) -> Option<f64> {

@@ -19,6 +19,7 @@ pub enum ProviderId {
     OpenAI,
     DeepSeekAnthropic,
     DeepSeekOpenAI,
+    Local,
 }
 
 #[derive(Debug, Clone)]
@@ -107,6 +108,7 @@ impl ProviderId {
             Self::OpenAI => "openai",
             Self::DeepSeekAnthropic => "deepseek_anthropic",
             Self::DeepSeekOpenAI => "deepseek_openai",
+            Self::Local => "local",
         }
     }
 }

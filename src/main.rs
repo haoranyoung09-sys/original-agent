@@ -6,6 +6,7 @@ mod changes;
 mod commands;
 mod config;
 mod fsops;
+mod local_model;
 mod model_catalog;
 mod openai_client;
 mod provider;
@@ -42,7 +43,22 @@ use crate::session::{SessionState, SharedSession};
 
 enum Backend {
     Anthropic(Anthropic),
-    OpenAi(OpenAiClient),
+    OpenAi {
+        client: OpenAiClient,
+        _local_server: Option<local_model::LocalServerGuard>,
+    },
+}
+
+impl Backend {
+    fn base_url(&self) -> Option<&str> {
+        match self {
+            Self::OpenAi {
+                _local_server: Some(guard),
+                ..
+            } => Some(guard.base_url.as_str()),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Parser)]
@@ -97,8 +113,27 @@ fn load_dotenv() {
     }
 }
 
-fn build_backend(cfg: &Config) -> Result<Backend> {
+async fn build_backend(cfg: &Config) -> Result<Backend> {
     cfg.validate()?;
+    if cfg.provider == ProviderId::Local {
+        let path_str = cfg
+            .local_model_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .context("未配置本地 GGUF 模型路径；请运行 /login 选择本地模型")?;
+        let guard = local_model::start_llama_server(
+            std::path::Path::new(path_str),
+            &cfg.model,
+            cfg.context_window,
+        )
+        .await?;
+        let client = OpenAiClient::new("local".into(), &guard.base_url)?;
+        return Ok(Backend::OpenAi {
+            client,
+            _local_server: Some(guard),
+        });
+    }
     let key = cfg.effective_api_key().context("缺少 API Key")?;
     match cfg.api_style {
         ApiStyle::Anthropic => {
@@ -107,7 +142,10 @@ fn build_backend(cfg: &Config) -> Result<Backend> {
                 .with_base_url(provider::anthropic_base_url(&cfg.base_url));
             Ok(Backend::Anthropic(client))
         }
-        ApiStyle::OpenAI => Ok(Backend::OpenAi(OpenAiClient::new(key, &cfg.base_url)?)),
+        ApiStyle::OpenAI => Ok(Backend::OpenAi {
+            client: OpenAiClient::new(key, &cfg.base_url)?,
+            _local_server: None,
+        }),
     }
 }
 
@@ -451,7 +489,7 @@ fn read_secret(prompt: &str) -> Result<String> {
     }
 }
 
-fn do_login(
+async fn do_login(
     rl: &mut Editor<ReplHelper, rustyline::history::DefaultHistory>,
     cfg: &mut Config,
     session: &SharedSession,
@@ -466,6 +504,7 @@ fn do_login(
     let mut next = cfg.clone();
     next.provider = id;
     next.api_style = preset.api_style;
+    next.local_model_path = None;
     next.base_url = if id == ProviderId::Custom {
         rl.readline("服务地址: ")?.trim().to_owned()
     } else {
@@ -484,7 +523,8 @@ fn do_login(
     if !key.trim().is_empty() {
         next.api_key = Some(key.trim().into());
     }
-    let client = build_backend(&next)?;
+    *backend = None;
+    let client = build_backend(&next).await?;
     next.save()?;
     *cfg = next;
     *backend = Some(client);
@@ -504,6 +544,83 @@ fn do_login(
     {
         let s = session.lock().unwrap();
         println!("已登录。");
+        ui::print_status_line(&s, cfg);
+    }
+    Ok(())
+}
+
+async fn do_local_login(
+    rl: &mut Editor<ReplHelper, rustyline::history::DefaultHistory>,
+    cfg: &mut Config,
+    session: &SharedSession,
+    agent: &OriginalAgent,
+    backend: &mut Option<Backend>,
+) -> Result<()> {
+    let discovered = local_model::discover_local_models();
+    let mut labels: Vec<String> = discovered.iter().map(|m| m.display_name.clone()).collect();
+    labels.push("手动输入 .gguf 文件路径".to_string());
+    let label_refs: Vec<&str> = labels.iter().map(String::as_str).collect();
+    let title = if discovered.is_empty() {
+        "未扫描到 Ollama / 本地模型，请选择"
+    } else {
+        "选择本地模型（无需运行 Ollama，将通过 llama-server 加载）"
+    };
+    let choice = choose(title, &label_refs)?;
+
+    let (model_id, gguf_path) = if choice < discovered.len() {
+        let picked = &discovered[choice];
+        (picked.model_id.clone(), picked.gguf_path.clone())
+    } else {
+        let raw = rl.readline("GGUF 文件路径: ")?;
+        let trimmed = raw.trim().trim_matches('"').trim_matches('\'');
+        anyhow::ensure!(!trimmed.is_empty(), "路径不能为空");
+        let path = std::path::PathBuf::from(trimmed);
+        anyhow::ensure!(path.is_file(), "找不到文件: {}", path.display());
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("local-model")
+            .to_string();
+        (stem, path)
+    };
+
+    let mut next = cfg.clone();
+    next.provider = ProviderId::Local;
+    next.api_style = ApiStyle::OpenAI;
+    next.model = model_id;
+    next.local_model_path = Some(gguf_path.to_string_lossy().into_owned());
+    next.base_url = "http://127.0.0.1:8080/v1".into();
+    next.api_key = None;
+    next.context_window = local_model::DEFAULT_LOCAL_CONTEXT_WINDOW;
+    next.pricing = config::Pricing::default();
+
+    *backend = None;
+    let client = build_backend(&next).await?;
+    let active_url = client
+        .base_url()
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| next.base_url.clone());
+    next.base_url = active_url.clone();
+    next.save()?;
+    *cfg = next;
+    *backend = Some(client);
+
+    {
+        let mut s = session.lock().unwrap();
+        s.logged_in = true;
+        s.model = cfg.model.clone();
+        s.base_url = active_url;
+        s.effort = cfg.effort;
+        s.provider = cfg.provider;
+        s.api_style = cfg.api_style;
+        s.context_window = cfg.context_window;
+    }
+    agent.set_model(cfg.model.clone());
+    agent.set_effort(cfg.effort);
+
+    {
+        let s = session.lock().unwrap();
+        println!("已连接本地模型（未运行 Ollama）。");
         ui::print_status_line(&s, cfg);
     }
     Ok(())
@@ -657,9 +774,10 @@ async fn main() -> Result<()> {
         "Token limits must be positive"
     );
 
-    let initially_logged_in = cfg.effective_api_key().is_some()
-        && !cfg.model.trim().is_empty()
-        && !cfg.base_url.trim().is_empty();
+    let initially_logged_in = cfg.is_local_ready()
+        || (cfg.effective_api_key().is_some()
+            && !cfg.model.trim().is_empty()
+            && !cfg.base_url.trim().is_empty());
     let session: SharedSession = Arc::new(Mutex::new(SessionState::from_config(
         &cfg,
         initially_logged_in,
@@ -685,7 +803,20 @@ async fn main() -> Result<()> {
     let mut openai_messages: Vec<ChatMessage> = Vec::new();
 
     let mut backend: Option<Backend> = if initially_logged_in {
-        Some(build_backend(&cfg)?)
+        match build_backend(&cfg).await {
+            Ok(b) => {
+                if let Some(url) = b.base_url() {
+                    session.lock().unwrap().base_url = url.to_string();
+                }
+                Some(b)
+            }
+            Err(e) if oneshot.is_none() && cfg.provider == ProviderId::Local => {
+                eprintln!("本地模型启动失败: {e:#}\n可输入 /login 重新选择模型或接入方式。");
+                session.lock().unwrap().logged_in = false;
+                None
+            }
+            Err(e) => return Err(e),
+        }
     } else {
         None
     };
@@ -713,7 +844,7 @@ async fn main() -> Result<()> {
                 )
                 .await?;
             }
-            Backend::OpenAi(c) => {
+            Backend::OpenAi { client: c, .. } => {
                 run_openai_turn(
                     c,
                     &cfg.model,
@@ -849,29 +980,52 @@ async fn main() -> Result<()> {
                         continue;
                     }
                     commands::SlashAction::Login => {
-                        let mode = (|| -> Result<bool> {
-                            if choose("登录方式", &["API", "订阅"])? == 0 {
-                                return Ok(true);
+                        enum LoginChoice {
+                            Api,
+                            Local,
+                            Done,
+                        }
+                        let mode = (|| -> Result<LoginChoice> {
+                            match choose(
+                                "登录方式",
+                                &[
+                                    "API",
+                                    "本地模型 (GGUF / llama-server，无需运行 Ollama)",
+                                    "订阅",
+                                ],
+                            )? {
+                                0 => Ok(LoginChoice::Api),
+                                1 => Ok(LoginChoice::Local),
+                                _ => {
+                                    let clients = [
+                                        subscription::Client::Codex,
+                                        subscription::Client::Claude,
+                                        subscription::Client::Gemini,
+                                    ];
+                                    let i = choose(
+                                        "订阅服务",
+                                        &["ChatGPT / Codex", "Claude", "Gemini"],
+                                    )?;
+                                    subscription::launch(clients[i], &cwd)?;
+                                    Ok(LoginChoice::Done)
+                                }
                             }
-                            let clients = [
-                                subscription::Client::Codex,
-                                subscription::Client::Claude,
-                                subscription::Client::Gemini,
-                            ];
-                            let i = choose("订阅服务", &["ChatGPT / Codex", "Claude", "Gemini"])?;
-                            subscription::launch(clients[i], &cwd)?;
-                            Ok(false)
                         })();
-                        match mode {
-                            Ok(true) => (),
-                            Ok(false) => continue,
+                        let outcome = match mode {
+                            Ok(LoginChoice::Api) => {
+                                do_login(&mut rl, &mut cfg, &session, &agent, &mut backend).await
+                            }
+                            Ok(LoginChoice::Local) => {
+                                do_local_login(&mut rl, &mut cfg, &session, &agent, &mut backend)
+                                    .await
+                            }
+                            Ok(LoginChoice::Done) => continue,
                             Err(e) => {
                                 eprintln!("登录已结束: {e}");
                                 continue;
                             }
-                        }
-                        if let Err(e) = do_login(&mut rl, &mut cfg, &session, &agent, &mut backend)
-                        {
+                        };
+                        if let Err(e) = outcome {
                             eprintln!("登录失败: {e:#}");
                         } else {
                             // Reset chat histories when switching backends.
@@ -939,7 +1093,7 @@ async fn main() -> Result<()> {
                             )
                             .await
                         }
-                        Backend::OpenAi(c) => {
+                        Backend::OpenAi { client: c, .. } => {
                             run_openai_turn(
                                 c,
                                 &cfg.model,
