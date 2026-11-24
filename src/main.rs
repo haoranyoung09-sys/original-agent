@@ -342,6 +342,65 @@ impl ConditionalEventHandler for ToggleThinkingHandler {
     }
 }
 
+struct ToggleShellHandler {
+    session: SharedSession,
+}
+
+impl ConditionalEventHandler for ToggleShellHandler {
+    fn handle(
+        &self,
+        _evt: &Event,
+        _n: RepeatCount,
+        _positive: bool,
+        ctx: &EventContext,
+    ) -> Option<Cmd> {
+        if shell::raw_shell_enabled() {
+            tools::set_shell_enabled(false);
+            if let Ok(s) = self.session.lock() {
+                let cfg = Config::load().unwrap_or_default();
+                ui::emit_host_status(&s, &cfg);
+            }
+            return Some(Cmd::Repaint);
+        }
+        if ctx.line().trim().is_empty() {
+            return Some(Cmd::Insert(1, "/shell on".into()));
+        }
+        Some(Cmd::Noop)
+    }
+}
+
+struct OpenSettingsHandler;
+
+impl ConditionalEventHandler for OpenSettingsHandler {
+    fn handle(
+        &self,
+        _evt: &Event,
+        _n: RepeatCount,
+        _positive: bool,
+        ctx: &EventContext,
+    ) -> Option<Cmd> {
+        if ctx.line().trim().is_empty() {
+            return Some(Cmd::Insert(1, "/settings".into()));
+        }
+        Some(Cmd::Noop)
+    }
+}
+
+struct BusyGuard;
+
+impl BusyGuard {
+    fn start() -> Self {
+        ui::emit_host_busy(true);
+        Self
+    }
+}
+
+impl Drop for BusyGuard {
+    fn drop(&mut self) {
+        ui::emit_host_busy(false);
+    }
+}
+
 #[derive(Clone)]
 struct ReplHelper {
     input_frame: bool,
@@ -404,7 +463,8 @@ impl rustyline::highlight::Highlighter for ReplHelper {
 
     fn highlight_hint<'h>(&self, hint: &'h str) -> std::borrow::Cow<'h, str> {
         if ui::color_enabled() {
-            std::borrow::Cow::Owned(format!("\x1b[2m{hint}\x1b[0m"))
+            // Use explicit 256-color muted gray instead of SGR 2 (dim), which vt100 ignores.
+            std::borrow::Cow::Owned(format!("\x1b[38;5;240m{hint}\x1b[0m"))
         } else {
             std::borrow::Cow::Borrowed(hint)
         }
@@ -952,8 +1012,18 @@ async fn main() -> Result<()> {
         })),
     );
     rl.bind_sequence(
+        KeyEvent(KeyCode::F(2), Modifiers::NONE),
+        EventHandler::Conditional(Box::new(OpenSettingsHandler)),
+    );
+    rl.bind_sequence(
         KeyEvent(KeyCode::F(3), Modifiers::NONE),
         EventHandler::Conditional(Box::new(ToggleThinkingHandler {
+            session: session.clone(),
+        })),
+    );
+    rl.bind_sequence(
+        KeyEvent(KeyCode::F(4), Modifiers::NONE),
+        EventHandler::Conditional(Box::new(ToggleShellHandler {
             session: session.clone(),
         })),
     );
@@ -1103,6 +1173,7 @@ async fn main() -> Result<()> {
                                     &["none (终端默认)", "dark (深色面板)", "light (浅色面板)"],
                                 ) {
                                     let mut draft = cfg.clone();
+                                    draft.effort = session.lock().unwrap().effort;
                                     draft.theme = themes[i];
                                     match draft.save() {
                                         Ok(()) => {
@@ -1165,6 +1236,7 @@ async fn main() -> Result<()> {
                             Some(raw) => match raw.parse::<config::Theme>() {
                                 Ok(t) => {
                                     let mut draft = cfg.clone();
+                                    draft.effort = session.lock().unwrap().effort;
                                     draft.theme = t;
                                     match draft.save() {
                                         Ok(()) => {
@@ -1178,6 +1250,54 @@ async fn main() -> Result<()> {
                                 }
                                 Err(e) => eprintln!("{e}"),
                             },
+                        }
+                        continue;
+                    }
+                    commands::SlashAction::Resume { id } => {
+                        match archive::load_conversation(&cwd, id.as_deref()) {
+                            Ok(restored) => {
+                                let resumed_id = restored.id;
+                                let topic = restored.topic;
+                                anthropic_messages.clear();
+                                openai_messages.clear();
+                                openai_messages.push(ChatMessage {
+                                    role: "system".into(),
+                                    content: Some(serde_json::Value::String(
+                                        agent::system_prompt_text(&cwd),
+                                    )),
+                                    tool_calls: None,
+                                    tool_call_id: None,
+                                    name: None,
+                                });
+                                let mut seen_user = false;
+                                let mut restored_count = 0usize;
+                                for (role, text) in restored.messages {
+                                    if !seen_user && role != "user" {
+                                        continue;
+                                    }
+                                    seen_user = true;
+                                    restored_count += 1;
+                                    anthropic_messages.push(MessageParam {
+                                        role: if role == "assistant" {
+                                            MessageRole::Assistant
+                                        } else {
+                                            MessageRole::User
+                                        },
+                                        content: MessageParamContent::String(text.clone()),
+                                    });
+                                    openai_messages.push(ChatMessage {
+                                        role,
+                                        content: Some(serde_json::Value::String(text)),
+                                        tool_calls: None,
+                                        tool_call_id: None,
+                                        name: None,
+                                    });
+                                }
+                                println!(
+                                    "已恢复会话「{topic}」({resumed_id})，共载入 {restored_count} 条消息。"
+                                );
+                            }
+                            Err(e) => eprintln!("恢复失败: {e}"),
                         }
                         continue;
                     }
@@ -1225,6 +1345,7 @@ async fn main() -> Result<()> {
                                 }
                             }
                         })();
+                        cfg.effort = session.lock().unwrap().effort;
                         let outcome = match mode {
                             Ok(LoginChoice::Api) => {
                                 do_login(&mut rl, &mut cfg, &session, &agent, &mut backend).await
@@ -1256,28 +1377,59 @@ async fn main() -> Result<()> {
                             println!("请先 /login。");
                             continue;
                         }
-                        match name {
+                        let chosen = match name {
+                            Some(rest) => Some(rest),
                             None => {
+                                let cur_model = session.lock().unwrap().model.clone();
+                                println!("当前模型: {cur_model}");
+                                let suggested = model_catalog::suggested_models(cfg.provider);
+                                if suggested.is_empty()
+                                    || !std::io::IsTerminal::is_terminal(&std::io::stdin())
+                                {
+                                    println!("切换: /model <name>");
+                                    None
+                                } else {
+                                    let mut labels: Vec<String> = vec!["保留当前模型".into()];
+                                    for m in suggested {
+                                        if *m == cur_model {
+                                            labels.push(format!("{m} (当前)"));
+                                        } else {
+                                            labels.push((*m).to_string());
+                                        }
+                                    }
+                                    labels.push("手动输入模型名".into());
+                                    let refs: Vec<&str> =
+                                        labels.iter().map(String::as_str).collect();
+                                    match choose("切换模型", &refs) {
+                                        Ok(0) | Err(_) => None,
+                                        Ok(i) if i <= suggested.len() => {
+                                            Some(suggested[i - 1].to_string())
+                                        }
+                                        Ok(_) => rl
+                                            .readline("模型 ID: ")
+                                            .ok()
+                                            .map(|s| s.trim().to_string())
+                                            .filter(|s| !s.is_empty()),
+                                    }
+                                }
+                            }
+                        };
+                        if let Some(rest) = chosen {
+                            cfg.effort = session.lock().unwrap().effort;
+                            cfg.model = rest;
+                            apply_model_pricing_and_context(&mut cfg);
+                            let _ = cfg.save();
+                            {
+                                let mut s = session.lock().unwrap();
+                                s.model = cfg.model.clone();
+                                s.context_window = cfg.context_window;
+                            }
+                            agent.set_model(cfg.model.clone());
+                            {
                                 let s = session.lock().unwrap();
-                                println!("当前模型: {}", s.model);
-                                println!("切换: /model <name>");
+                                ui::emit_host_status(&s, &cfg);
                             }
-                            Some(rest) => {
-                                cfg.model = rest;
-                                apply_model_pricing_and_context(&mut cfg);
-                                let _ = cfg.save();
-                                {
-                                    let mut s = session.lock().unwrap();
-                                    s.model = cfg.model.clone();
-                                    s.context_window = cfg.context_window;
-                                }
-                                agent.set_model(cfg.model.clone());
-                                {
-                                    let s = session.lock().unwrap();
-                                    ui::emit_host_status(&s, &cfg);
-                                }
-                                println!("model → {}", cfg.model);
-                            }
+                            println!("model → {}", cfg.model);
                         }
                         continue;
                     }
@@ -1299,6 +1451,7 @@ async fn main() -> Result<()> {
                 let mut previous_files = initial_files.clone();
                 let mut turn_text = line.clone();
                 let mut previous_feedback = None;
+                let _busy = BusyGuard::start();
                 for attempt in 0..=3 {
                     let attempt_revision = changes::revision();
                     let saved_anthropic_len = anthropic_messages.len();

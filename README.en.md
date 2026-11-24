@@ -9,7 +9,7 @@
 
 Explore code, edit files, and run project tests from the terminal. Original is a Rust coding agent with Anthropic and OpenAI-compatible backends, in-process file undo, and local session archives. The interaction draws on [Pi](https://github.com/badlogic/pi-mono).
 
-This source is package version `0.3.13`. `original --version`, `Cargo.toml`, and tag `v0.3.13` use that same number. The published tag `v0.3.11` still points at the earlier README and demo merge, whose package version is `0.3.11`. Leave that tag where it is. The older tag `v0.3.10` still points at package `0.3.9`. The release workflow requires the tag and package version to match, so `v0.3.10` has no prebuilt assets.
+This source is package version `0.3.14`. `original --version`, `Cargo.toml`, and tag `v0.3.14` use that same number. The published tag `v0.3.11` still points at the earlier README and demo merge, whose package version is `0.3.11`. Leave that tag where it is. The older tag `v0.3.10` still points at package `0.3.9`. The release workflow requires the tag and package version to match, so `v0.3.10` has no prebuilt assets.
 
 The four badges read this repository. They do not claim downloads or coverage:
 
@@ -20,7 +20,7 @@ The four badges read this repository. They do not claim downloads or coverage:
 
 ## Start here
 
-1. [Install](#installation). Use the installer when Rust is not available, or `cargo install --locked --tag v0.3.13` for this source.
+1. [Install](#installation). Use the installer when Rust is not available, or `cargo install --locked --tag v0.3.14` for this source.
 2. Run `original`, then `/login`. The program cannot call a model before login.
 3. An interactive terminal starts full screen. `original --classic` uses the line interface.
 
@@ -36,7 +36,7 @@ Seven-second screen recording of the same keystrokes: [fullscreen-help.mp4](docs
 
 ## Full-screen terminal
 
-Interactive startup enters the full-screen host only when `--classic` and `--subscription` are absent, there is no `-p` or positional prompt, and both stdin and stdout are terminals. The host uses differential screen rendering (`contents_diff`) with synchronized output (`ESC[?2026h/l`) and bracketed paste. At 110 columns or more, a 28-column session index and live status sidebar appear on the right and hide on narrower terminals. A fixed bottom status bar displays color-coded effort badges (`LOW` gray, `MEDIUM` green, `HIGH` amber, `MAX` red), `⚠ SHELL`, `THINK`, model name, context percentage, cost estimate, and scrollback status (`↑ 回看`). State changes from `Shift+Tab`, `F3`, `/settings`, `/shell`, `/thinking`, and `/theme` sync immediately to both the sidebar and status bar via a custom OSC 7700 sequence. Page Up and Page Down move about ten scrollback lines (hiding the cursor while scrolled back), and any other key returns to the live view. F10 exits the host. The window title while it runs is `original`.
+Interactive startup enters the full-screen host only when `--classic` and `--subscription` are absent, there is no `-p` or positional prompt, and both stdin and stdout are terminals. The host uses differential screen rendering (`contents_diff`) with synchronized output (`ESC[?2026h/l`), bracketed paste, and mouse-wheel scrollback (without hijacking Up/Down arrow input history; hold `Shift` and drag to select text). At 110 columns or more, a 28-column clickable session index and live status sidebar appear on the right and hide on narrower terminals. A fixed bottom status bar displays clickable color-coded effort badges (`LOW` gray, `MEDIUM` green, `HIGH` amber, `MAX` red), `! SHELL`, `THINK`, an in-flight busy spinner (`⠋ 生成中 Ns`), model name, context percentage, cost estimate, and clickable scrollback status (`↑ 回看`). State changes from `Shift+Tab`, `F2`, `F3`, `F4`, `/settings`, `/shell`, `/thinking`, `/theme`, and `/model` sync immediately to the top-left banner, sidebar, and status bar via a custom OSC 7700 sequence. Page Up and Page Down move about ten scrollback lines (hiding the cursor while scrolled back), and any other key returns to the live view. F10 exits the host. The window title while it runs is `original`.
 
 The host runs this same program inside an embedded terminal. Login, settings, and per-command approval stay line prompts. The input prompt `❯` changes color to match the active effort level (white/green/magenta/red). `original --classic`, one-shot mode, official CLI handoff, and non-terminal stdin or stdout use the line interface directly.
 
@@ -198,12 +198,13 @@ original --show-thinking
 | Command | Behavior |
 | --- | --- |
 | `/login` | Choose API, local GGUF, or subscription. API then asks for a provider and key; local asks for a discovered weight or a manual path |
-| `/model`, `/model <name>` | Show or switch the model and apply a known catalog entry |
-| `/settings`, `/setting`, `/config` | Interactively configure effort, thinking display, session shell access, auto-verify, and panel theme |
-| `/thinking [on\|off]` / `F3` | Toggle displaying model thinking at runtime |
-| `/shell [on\|off]` | Enable or disable unprompted shell commands for this session (enabling asks confirmation; not persisted) |
+| `/model`, `/model <name>` | Interactively pick a provider model or switch directly and apply a known catalog entry |
+| `/settings`, `/setting`, `/config` / `F2` | Interactively configure effort, thinking display, session shell access, auto-verify, and panel theme |
+| `/thinking [on\|off]` / `F3` | Toggle displaying model thinking at runtime (or click `THINK` on the bottom bar) |
+| `/shell [on\|off]` / `F4` | Enable or disable unprompted shell commands for this session (enabling asks confirmation; not persisted; or click `SHELL`) |
 | `/theme [none\|dark\|light]` | Switch full-screen sidebar/status-bar panel theme |
-| `/status` | Model, usage, and cost estimate |
+| `/resume`, `/resume <ID>` | Restore the most recent or specified workspace session archive into the current conversation |
+| `/status` | Model, usage, cost estimate, and runtime toggles |
 | `/usage` | Token counters for this session |
 | Shift+Tab | Cycle and save low, medium, high, max |
 | `Ctrl+C` | Cancel an in-flight model turn and roll back incomplete turn messages |

@@ -23,13 +23,18 @@ fn c(code: &str, text: &str) -> String {
 
 pub const RESPONSE_STYLE: &str = "按用户使用的语言自然回答。简单问题直接回答。执行任务时，仅在有实质进展时简短说明；完成后先说结果，再按需要给出文件、验证证据和未解决的问题。省略固定开场、空标题和重复的工具日志。";
 
+fn display_path(path: &std::path::Path) -> String {
+    let raw = path.display().to_string();
+    raw.strip_prefix(r"\\?\").unwrap_or(&raw).to_string()
+}
+
 fn thought_block(text: &str, styled: bool) -> String {
     let block = std::iter::once("思考".to_owned())
         .chain(text.lines().map(|line| format!("│ {line}")))
         .collect::<Vec<_>>()
         .join("\n");
     if styled {
-        format!("\x1b[2;3m{block}\x1b[0m")
+        format!("\x1b[3;38;5;244m{block}\x1b[0m")
     } else {
         block
     }
@@ -68,7 +73,7 @@ pub fn print_thought_chunk(text: &str, started: &mut bool) {
     if !*started {
         *started = true;
         if styled {
-            eprint!("\x1b[2;3m思考\n│ ");
+            eprint!("\x1b[3;38;5;244m思考\n│ ");
         } else {
             eprint!("思考\n│ ");
         }
@@ -261,7 +266,7 @@ pub fn print_startup(cwd: &std::path::Path, session: &SessionState, cfg: &Config
     print_icon_and_title(&startup_subtitle(session));
     println!();
     print_status_line(session, cfg);
-    println!("{}", c(LABEL, &format!("cwd {}", cwd.display())));
+    println!("{}", c(LABEL, &format!("cwd {}", display_path(cwd))));
     if session.logged_in {
         println!(
             "{}",
@@ -298,7 +303,27 @@ pub fn print_status_full(session: &SessionState, cfg: &Config, cwd: &std::path::
             )
         );
     }
-    println!("{}", c(LABEL, &format!("cwd {}", cwd.display())));
+    println!(
+        "{}",
+        c(
+            LABEL,
+            &format!(
+                "thinking {} · shell {} · theme {}",
+                if crate::tool_display::thinking_enabled() {
+                    "on"
+                } else {
+                    "off"
+                },
+                if crate::shell::raw_shell_enabled() {
+                    "on"
+                } else {
+                    "off"
+                },
+                cfg.theme.as_str()
+            )
+        )
+    );
+    println!("{}", c(LABEL, &format!("cwd {}", display_path(cwd))));
     println!(
         "{}",
         c(
@@ -316,11 +341,13 @@ pub fn print_status_full(session: &SessionState, cfg: &Config, cwd: &std::path::
 
 /// Keep frame rules inside the visible viewport, including narrow terminals.
 /// The final column is reserved to prevent automatic line wrapping.
+#[allow(dead_code)]
 pub fn input_frame_width(terminal_columns: usize) -> usize {
     terminal_columns.saturating_sub(1).max(1)
 }
 
 /// Pi-like prompt — no frame.
+#[allow(dead_code)]
 pub fn input_prompt(width: usize) -> String {
     format!("{}\n❯ ", "─".repeat(width))
 }
@@ -332,18 +359,20 @@ pub fn print_help_panel() {
             LABEL,
             "\
 /login            选服务商 / Key / URL / 模型（价格与上下文自动填写）
-/model [name]     查看或切换模型
-/settings         交互式调整思考强度、思考显示、Shell 权限与自动验证
-/thinking [on|off] 运行时开启/关闭思考过程显示（快捷键 F3）
-/shell [on|off]   本会话开启/关闭免确认 Shell 权限（快捷键 F4）
+/model [name]     交互选择模型或直接切换
+/settings         交互式调整思考强度、思考显示、Shell 权限与自动验证（F2）
+/thinking [on|off] 运行时开启/关闭思考过程显示（F3 或点击底栏 THINK）
+/shell [on|off]   本会话开启/关闭免确认 Shell 权限（F4 或点击底栏 SHELL）
 /theme [dark|light|none] 切换面板配色主题
+/resume [ID]      恢复最近一次或指定 ID 的历史会话继续对话
 /usage            当前会话 token 用量
-/history [ID]     列出项目归档（含自动主题）或查看记录
-/diff / /undo     查看文件工具改动 diff / 回退改动
-/status           状态
+/history [ID]     列出项目归档（也可直接点击右侧栏会话）或查看记录
+/diff / /undo     查看文件工具改动 diff（着色） / 回退改动
+/status           状态与运行时开关
 /clear            清空对话（用量保留）
-/help  /exit      帮助 / 退出
-Shift+Tab         思考强度 low → medium → high → max
+/help  /exit      帮助 / 退出（输入 / 支持 Tab 补全）
+Shift+Tab         思考强度 low → medium → high → max（也可点击底栏徽标）
+Ctrl+C            请求中按一次中断本轮调用；全屏复制文本请按住 Shift 拖动
 original -p \"…\"   一次性（需已登录）
 工具               project_overview / glob / grep / read / edit / multi_edit / write / verify / bash"
         )
@@ -418,7 +447,7 @@ pub fn emit_host_status(session: &SessionState, cfg: &Config) {
     };
     let logged_in = if session.logged_in { "1" } else { "0" };
     print!(
-        "\x1b]7700;model={};effort={};shell={};thinking={};logged_in={};ctx={};cost={};theme={}\x07",
+        "\x1b]7700;model={};effort={};shell={};thinking={};logged_in={};ctx={};cost={};theme={};api_style={}\x07",
         sanitize_osc(model),
         session.effort.as_str(),
         shell,
@@ -427,13 +456,24 @@ pub fn emit_host_status(session: &SessionState, cfg: &Config) {
         sanitize_osc(&ctx),
         sanitize_osc(&cost),
         cfg.theme.as_str(),
+        session.api_style.as_str(),
     );
+    let _ = std::io::stdout().flush();
+}
+
+pub fn emit_host_busy(busy: bool) {
+    if std::env::var_os("ORIGINAL_AGENT_HOST").is_none() {
+        return;
+    }
+    use std::io::Write;
+    print!("\x1b]7700;busy={}\x07", if busy { "1" } else { "0" });
     let _ = std::io::stdout().flush();
 }
 
 pub fn set_window_title() {
     let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::SetTitle("original"));
 }
+#[allow(dead_code)]
 pub fn input_footer(model: &str, effort: crate::session::EffortLevel, width: usize) -> String {
     let name = if model.is_empty() { "未登录" } else { model };
     let mut label = String::new();

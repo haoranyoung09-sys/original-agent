@@ -6,8 +6,8 @@ use anyhow::Result;
 use crossterm::{
     cursor,
     event::{
-        self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEventKind,
-        KeyModifiers,
+        self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
     },
     execute, queue,
     style::{
@@ -48,6 +48,7 @@ impl Drop for Restore {
         }
         let _ = execute!(
             stdout,
+            DisableMouseCapture,
             DisableBracketedPaste,
             LeaveAlternateScreen,
             cursor::Show
@@ -78,6 +79,8 @@ struct HostStatus {
     ctx: String,
     cost: String,
     theme: Theme,
+    api_style: String,
+    busy_since: Option<std::time::Instant>,
 }
 
 impl HostStatus {
@@ -98,6 +101,8 @@ impl HostStatus {
                 ctx: String::new(),
                 cost: String::new(),
                 theme: cfg.theme,
+                api_style: cfg.api_style.as_str().to_string(),
+                busy_since: None,
             },
             Err(_) => Self {
                 model: "未登录".into(),
@@ -108,11 +113,14 @@ impl HostStatus {
                 ctx: String::new(),
                 cost: String::new(),
                 theme: Theme::None,
+                api_style: "anthropic".into(),
+                busy_since: None,
             },
         }
     }
 
     fn apply_osc(&mut self, payload: &str) -> bool {
+        let prev_busy = self.busy_since.is_some();
         let prev = self.clone();
         for part in payload.split(';') {
             let Some((k, v)) = part.split_once('=') else {
@@ -135,10 +143,30 @@ impl HostStatus {
                         self.theme = t;
                     }
                 }
+                "api_style" => self.api_style = v.to_string(),
+                "busy" => {
+                    let is_busy = v == "1" || v == "true";
+                    if is_busy {
+                        if self.busy_since.is_none() {
+                            self.busy_since = Some(std::time::Instant::now());
+                        }
+                    } else {
+                        self.busy_since = None;
+                    }
+                }
                 _ => {}
             }
         }
-        *self != prev
+        self.model != prev.model
+            || self.effort != prev.effort
+            || self.shell_enabled != prev.shell_enabled
+            || self.show_thinking != prev.show_thinking
+            || self.logged_in != prev.logged_in
+            || self.ctx != prev.ctx
+            || self.cost != prev.cost
+            || self.theme != prev.theme
+            || self.api_style != prev.api_style
+            || self.busy_since.is_some() != prev_busy
     }
 }
 
@@ -192,6 +220,11 @@ impl OscFilter {
                     self.buf.extend_from_slice(b"\x1b]");
                     continue;
                 }
+                if b == 0x1b {
+                    out.push(0x1b);
+                    self.saw_esc = true;
+                    continue;
+                }
                 out.push(0x1b);
                 out.push(b);
                 continue;
@@ -230,7 +263,28 @@ fn layout(columns: u16) -> u16 {
 }
 
 fn char_display_width(c: char) -> usize {
-    if c.is_ascii() || matches!(c, '─' | '│' | '·' | '…' | '◆' | '●' | '⚠' | '↑') {
+    if c.is_ascii()
+        || matches!(
+            c,
+            '─' | '│'
+                | '·'
+                | '…'
+                | '◆'
+                | '●'
+                | '⚠'
+                | '↑'
+                | '⠋'
+                | '⠙'
+                | '⠹'
+                | '⠸'
+                | '⠼'
+                | '⠴'
+                | '⠦'
+                | '⠧'
+                | '⠇'
+                | '⠏'
+        )
+    {
         1
     } else {
         2
@@ -333,12 +387,27 @@ fn effort_fg_color(effort: EffortLevel) -> Color {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BarAction {
+    CycleEffort,
+    ToggleShell,
+    ToggleThinking,
+    ClearScrollback,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BarHitbox {
+    start_col: u16,
+    end_col: u16,
+    action: BarAction,
+}
+
 fn draw_sidebar(
     out: &mut impl Write,
     width: u16,
     pty_rows: u16,
     columns: u16,
-    listing: &str,
+    entries: &[crate::archive::SessionEntry],
     status: &HostStatus,
 ) -> Result<()> {
     queue!(out, ResetColor)?;
@@ -364,18 +433,23 @@ fn draw_sidebar(
         (effort_fg_color(status.effort), effort_label),
     ];
     lines.push((SIDEBAR_RULE, "─".repeat(text_width)));
-    lines.push((SIDEBAR_TITLE, "Sessions".into()));
-    lines.extend(
-        listing
-            .lines()
-            .take(pty_rows.saturating_sub(10) as usize)
-            .map(|line| (SIDEBAR_FG, line.to_string())),
-    );
+    lines.push((SIDEBAR_TITLE, "Sessions (Click)".into()));
+    let max_sessions = pty_rows.saturating_sub(9) as usize;
+    if entries.is_empty() {
+        lines.push((SIDEBAR_RULE, "No sessions".into()));
+    } else {
+        lines.extend(
+            entries
+                .iter()
+                .take(max_sessions)
+                .map(|entry| (SIDEBAR_FG, entry.topic.clone())),
+        );
+    }
     let hints = [
-        "/history: open archive",
-        "/settings: preferences",
-        "F10: exit",
-        "PgUp/PgDn: scroll",
+        "Click: open session",
+        "F2: settings · F10: exit",
+        "Wheel/PgUp: scroll",
+        "Shift+Drag: select text",
     ];
     for y in 0..pty_rows {
         let (color, text) = if y + 4 >= pty_rows {
@@ -420,11 +494,12 @@ fn emit_status_badge<W: Write>(
     max_cols: usize,
     text: &str,
     style: BadgeStyle,
-) -> Result<()> {
+) -> Result<Option<(u16, u16)>> {
     let w: usize = text.chars().map(char_display_width).sum();
     if *used + w > max_cols {
-        return Ok(());
+        return Ok(None);
     }
+    let start = *used as u16;
     if style.styled {
         queue!(
             out,
@@ -444,7 +519,7 @@ fn emit_status_badge<W: Write>(
         queue!(out, Print(text))?;
     }
     *used += w;
-    Ok(())
+    Ok(Some((start, *used as u16)))
 }
 
 fn draw_status_bar(
@@ -453,13 +528,22 @@ fn draw_status_bar(
     columns: u16,
     status: &HostStatus,
     scrollback: usize,
-) -> Result<()> {
+) -> Result<Vec<BarHitbox>> {
+    let mut hitboxes = Vec::new();
     if rows == 0 || columns == 0 {
-        return Ok(());
+        return Ok(hitboxes);
     }
     let y = rows - 1;
     let styled = crate::ui::color_enabled();
     let bar_bg = panel_bg(status.theme).unwrap_or(Color::AnsiValue(236));
+    let dim_bg = match status.theme {
+        Theme::Light => Color::AnsiValue(252),
+        _ => Color::AnsiValue(238),
+    };
+    let dim_fg = match status.theme {
+        Theme::Light => Color::AnsiValue(242),
+        _ => Color::AnsiValue(245),
+    };
 
     queue!(out, cursor::MoveTo(0, y), ResetColor)?;
     if styled {
@@ -475,7 +559,7 @@ fn draw_status_bar(
     } else {
         format!("[{}]", status.effort.as_str().to_ascii_uppercase())
     };
-    emit_status_badge(
+    if let Some((start_col, end_col)) = emit_status_badge(
         out,
         &mut used,
         max_cols,
@@ -487,40 +571,91 @@ fn draw_status_bar(
             fg: eff_fg,
             bold: true,
         },
-    )?;
+    )? {
+        hitboxes.push(BarHitbox {
+            start_col,
+            end_col,
+            action: BarAction::CycleEffort,
+        });
+    }
 
-    if status.shell_enabled {
-        emit_status_badge(
+    let (shell_text, shell_bg, shell_fg, shell_bold) = if status.shell_enabled {
+        (
+            " ! SHELL ",
+            Color::AnsiValue(160),
+            Color::AnsiValue(255),
+            true,
+        )
+    } else {
+        (" SHELL ", dim_bg, dim_fg, false)
+    };
+    if let Some((start_col, end_col)) = emit_status_badge(
+        out,
+        &mut used,
+        max_cols,
+        shell_text,
+        BadgeStyle {
+            styled,
+            bar_bg,
+            bg: shell_bg,
+            fg: shell_fg,
+            bold: shell_bold,
+        },
+    )? {
+        hitboxes.push(BarHitbox {
+            start_col,
+            end_col,
+            action: BarAction::ToggleShell,
+        });
+    }
+
+    let (think_bg, think_fg) = if status.show_thinking {
+        (Color::AnsiValue(31), Color::AnsiValue(255))
+    } else {
+        (dim_bg, dim_fg)
+    };
+    if let Some((start_col, end_col)) = emit_status_badge(
+        out,
+        &mut used,
+        max_cols,
+        " THINK ",
+        BadgeStyle {
+            styled,
+            bar_bg,
+            bg: think_bg,
+            fg: think_fg,
+            bold: status.show_thinking,
+        },
+    )? {
+        hitboxes.push(BarHitbox {
+            start_col,
+            end_col,
+            action: BarAction::ToggleThinking,
+        });
+    }
+
+    if let Some(since) = status.busy_since {
+        const SPINNER: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+        let ms = since.elapsed().as_millis();
+        let frame = SPINNER[((ms / 120) as usize) % SPINNER.len()];
+        let secs = since.elapsed().as_secs();
+        let _ = emit_status_badge(
             out,
             &mut used,
             max_cols,
-            " ⚠ SHELL ",
+            &format!(" {frame} 生成中 {secs}s "),
             BadgeStyle {
                 styled,
                 bar_bg,
-                bg: Color::AnsiValue(160),
+                bg: Color::AnsiValue(62),
                 fg: Color::AnsiValue(255),
                 bold: true,
             },
         )?;
     }
-    if status.show_thinking {
-        emit_status_badge(
-            out,
-            &mut used,
-            max_cols,
-            " THINK ",
-            BadgeStyle {
-                styled,
-                bar_bg,
-                bg: Color::AnsiValue(31),
-                fg: Color::AnsiValue(255),
-                bold: false,
-            },
-        )?;
-    }
+
     if scrollback > 0 {
-        emit_status_badge(
+        if let Some((start_col, end_col)) = emit_status_badge(
             out,
             &mut used,
             max_cols,
@@ -532,7 +667,13 @@ fn draw_status_bar(
                 fg: Color::AnsiValue(255),
                 bold: true,
             },
-        )?;
+        )? {
+            hitboxes.push(BarHitbox {
+                start_col,
+                end_col,
+                action: BarAction::ClearScrollback,
+            });
+        }
     }
 
     let mut meta_parts = vec![status.model.clone()];
@@ -543,15 +684,27 @@ fn draw_status_bar(
         meta_parts.push(status.cost.clone());
     }
     let meta = format!("  {}", meta_parts.join(" · "));
-    let hints = "Shift+Tab 强度 · F3 思考 · F4 Shell · /help ";
+    let hints = if status.busy_since.is_some() {
+        "Ctrl+C 中断本轮 · F10 退出 "
+    } else {
+        "Shift+Tab 强度 · F2 设置 · F3 思考 · F4 Shell "
+    };
 
     let remaining = max_cols.saturating_sub(used);
     let hints_w: usize = hints.chars().map(char_display_width).sum();
     let meta_w: usize = meta.chars().map(char_display_width).sum();
 
     if remaining > 0 {
+        let meta_fg = match status.theme {
+            Theme::Light => Color::AnsiValue(236),
+            _ => Color::AnsiValue(250),
+        };
+        let hint_fg = match status.theme {
+            Theme::Light => Color::AnsiValue(242),
+            _ => Color::AnsiValue(243),
+        };
         if styled {
-            queue!(out, SetForegroundColor(Color::AnsiValue(250)))?;
+            queue!(out, SetForegroundColor(meta_fg))?;
         }
         if remaining >= meta_w + hints_w + 2 {
             queue!(out, Print(&meta))?;
@@ -560,7 +713,7 @@ fn draw_status_bar(
                 queue!(out, Print(" ".repeat(pad)))?;
             }
             if styled {
-                queue!(out, SetForegroundColor(Color::AnsiValue(243)))?;
+                queue!(out, SetForegroundColor(hint_fg))?;
             }
             queue!(out, Print(hints))?;
         } else {
@@ -568,6 +721,122 @@ fn draw_status_bar(
         }
     }
     queue!(out, ResetColor)?;
+    Ok(hitboxes)
+}
+
+fn sync_startup_subtitle(
+    out: &mut impl Write,
+    screen: &vt100::Screen,
+    width: u16,
+    pty_rows: u16,
+    status: &HostStatus,
+) -> Result<()> {
+    if screen.scrollback() > 0 || width <= 10 || pty_rows < 2 {
+        return Ok(());
+    }
+    let contents = screen.contents();
+    let lines: Vec<&str> = contents.lines().collect();
+    let title_row = lines
+        .iter()
+        .take(pty_rows.saturating_sub(1) as usize)
+        .position(|line| line.contains('◆') && line.contains("original"));
+    let Some(r) = title_row else {
+        return Ok(());
+    };
+    let styled = crate::ui::color_enabled();
+
+    // 1. Update row r + 1 right next to the top-left gem icon.
+    let subtitle_row = (r + 1) as u16;
+    if subtitle_row < pty_rows {
+        let avail = width.saturating_sub(9) as usize;
+        queue!(out, cursor::MoveTo(9, subtitle_row), ResetColor)?;
+        if status.logged_in {
+            let prefix = format!("{} · {} · ", status.api_style, status.model);
+            let eff = status.effort.as_str();
+            let prefix_w: usize = prefix.chars().map(char_display_width).sum();
+            let eff_w: usize = eff.chars().map(char_display_width).sum();
+            if prefix_w + eff_w <= avail {
+                let pad = avail - prefix_w - eff_w;
+                if styled {
+                    queue!(
+                        out,
+                        SetForegroundColor(SIDEBAR_FG),
+                        Print(&prefix),
+                        SetForegroundColor(effort_fg_color(status.effort)),
+                        SetAttribute(Attribute::Bold),
+                        Print(eff),
+                        SetAttribute(Attribute::Reset),
+                        Print(" ".repeat(pad))
+                    )?;
+                } else {
+                    queue!(out, Print(format!("{prefix}{eff}{}", " ".repeat(pad))))?;
+                }
+            } else {
+                let line = format!("{prefix}{eff}");
+                if styled {
+                    queue!(out, SetForegroundColor(SIDEBAR_FG))?;
+                }
+                queue!(out, Print(fit(&line, avail)), ResetColor)?;
+            }
+        } else {
+            if styled {
+                queue!(out, SetForegroundColor(SIDEBAR_FG))?;
+            }
+            queue!(out, Print(fit("终端 coding agent", avail)), ResetColor)?;
+        }
+    }
+
+    // 2. Also update the startup status line right below the gem icon (row r + 6)
+    // if it is still visible on screen so model and effort stay in sync there too.
+    let status_idx = r + 6;
+    if status_idx < pty_rows as usize {
+        if let Some(status_row_text) = lines.get(status_idx) {
+            if let Some(in_pos) = status_row_text.find(" · in ") {
+                let suffix = &status_row_text[in_pos..];
+                let model = if status.logged_in && !status.model.is_empty() {
+                    status.model.as_str()
+                } else {
+                    "未登录"
+                };
+                let eff = status.effort.as_str();
+                let prefix = format!("{model} · ");
+                let avail = width as usize;
+                let prefix_w: usize = prefix.chars().map(char_display_width).sum();
+                let eff_w: usize = eff.chars().map(char_display_width).sum();
+                let suffix_w: usize = suffix.chars().map(char_display_width).sum();
+                queue!(out, cursor::MoveTo(0, status_idx as u16), ResetColor)?;
+                if prefix_w + eff_w + suffix_w <= avail {
+                    let pad = avail - prefix_w - eff_w - suffix_w;
+                    if styled {
+                        queue!(
+                            out,
+                            SetForegroundColor(SIDEBAR_FG),
+                            Print(&prefix),
+                            SetForegroundColor(effort_fg_color(status.effort)),
+                            SetAttribute(Attribute::Bold),
+                            Print(eff),
+                            SetAttribute(Attribute::Reset),
+                            SetForegroundColor(SIDEBAR_FG),
+                            Print(suffix),
+                            Print(" ".repeat(pad)),
+                            ResetColor
+                        )?;
+                    } else {
+                        queue!(
+                            out,
+                            Print(format!("{prefix}{eff}{suffix}{}", " ".repeat(pad)))
+                        )?;
+                    }
+                } else {
+                    let full = format!("{prefix}{eff}{suffix}");
+                    if styled {
+                        queue!(out, SetForegroundColor(SIDEBAR_FG))?;
+                    }
+                    queue!(out, Print(fit(&full, avail)), ResetColor)?;
+                }
+            }
+        }
+    }
     Ok(())
 }
 
@@ -601,16 +870,14 @@ pub fn run(root: &Path) -> Result<()> {
     });
 
     // Background thread for session archive listing so drawing never blocks on disk I/O.
-    let (listing_tx, listing_rx) = mpsc::channel::<String>();
+    let (listing_tx, listing_rx) = mpsc::channel::<Vec<crate::archive::SessionEntry>>();
     let root_bg = root.to_path_buf();
     std::thread::spawn(move || {
-        let mut last = String::new();
+        let mut last: Option<Vec<crate::archive::SessionEntry>> = None;
         loop {
-            let next = crate::archive::command("/sessions", &root_bg)
-                .and_then(|r| r.ok())
-                .unwrap_or_default();
-            if next != last {
-                last = next.clone();
+            let next = crate::archive::list_entries(&root_bg).unwrap_or_default();
+            if last.as_ref() != Some(&next) {
+                last = Some(next.clone());
                 if listing_tx.send(next).is_err() {
                     break;
                 }
@@ -628,6 +895,7 @@ pub fn run(root: &Path) -> Result<()> {
         std::io::stdout(),
         EnterAlternateScreen,
         EnableBracketedPaste,
+        EnableMouseCapture,
         Clear(ClearType::All),
         cursor::Show,
         SetTitle("original")
@@ -636,11 +904,15 @@ pub fn run(root: &Path) -> Result<()> {
         let mut dirty = true;
         let mut full_redraw = true;
         let mut chrome_dirty = true;
-        let mut listing = String::new();
+        let mut entries: Vec<crate::archive::SessionEntry> = Vec::new();
+        let mut bar_hitboxes: Vec<BarHitbox> = Vec::new();
         let mut host_status = HostStatus::from_config();
         let mut osc_filter = OscFilter::default();
         let mut prev_screen: Option<vt100::Screen> = None;
+        let mut last_cols = columns;
+        let mut last_rows = rows;
         let mut last_draw = std::time::Instant::now() - Duration::from_millis(50);
+        let mut last_spinner_tick = std::time::Instant::now();
 
         loop {
             while let Ok(data) = receive.try_recv() {
@@ -656,33 +928,64 @@ pub fn run(root: &Path) -> Result<()> {
                     }
                 }
             }
-            while let Ok(next_listing) = listing_rx.try_recv() {
-                if next_listing != listing {
-                    listing = next_listing;
+            while let Ok(next_entries) = listing_rx.try_recv() {
+                if next_entries != entries {
+                    entries = next_entries;
                     chrome_dirty = true;
                     dirty = true;
                 }
             }
 
+            if host_status.busy_since.is_some()
+                && last_spinner_tick.elapsed() >= Duration::from_millis(120)
+            {
+                chrome_dirty = true;
+                dirty = true;
+                last_spinner_tick = std::time::Instant::now();
+            }
+
             if dirty && (full_redraw || last_draw.elapsed() >= Duration::from_millis(16)) {
                 let (columns, rows) = terminal::size()?;
-                pty_rows = rows.saturating_sub(1).max(1);
+                if columns != last_cols || rows != last_rows {
+                    last_cols = columns;
+                    last_rows = rows;
+                    width = layout(columns);
+                    pty_rows = rows.saturating_sub(1).max(1);
+                    pair.master.resize(PtySize {
+                        rows: pty_rows,
+                        cols: width,
+                        pixel_width: 0,
+                        pixel_height: 0,
+                    })?;
+                    parser.set_size(pty_rows, width);
+                    prev_screen = None;
+                    full_redraw = true;
+                    chrome_dirty = true;
+                }
                 let mut out = std::io::stdout().lock();
                 // Synchronized output avoids tearing/flicker on modern terminals.
                 out.write_all(b"\x1b[?2026h")?;
+                let mut pty_changed = false;
                 if full_redraw || prev_screen.is_none() {
                     out.write_all(&parser.screen().contents_formatted())?;
                     chrome_dirty = true;
+                    pty_changed = true;
                 } else if let Some(prev) = &prev_screen {
                     let diff = parser.screen().contents_diff(prev);
                     if !diff.is_empty() {
                         out.write_all(&diff)?;
+                        pty_changed = true;
                     }
                 }
                 queue!(out, ResetColor, SetTitle("original"))?;
-                if chrome_dirty {
-                    draw_sidebar(&mut out, width, pty_rows, columns, &listing, &host_status)?;
-                    draw_status_bar(
+                let need_chrome = chrome_dirty || pty_changed || full_redraw;
+                if need_chrome {
+                    // Always repaint the sidebar after any PTY diff because vt100 emits
+                    // ESC[K (EL) to clear trailing spaces, which reaches past `width`.
+                    draw_sidebar(&mut out, width, pty_rows, columns, &entries, &host_status)?;
+                }
+                if chrome_dirty || full_redraw {
+                    bar_hitboxes = draw_status_bar(
                         &mut out,
                         rows,
                         columns,
@@ -690,6 +993,15 @@ pub fn run(root: &Path) -> Result<()> {
                         parser.screen().scrollback(),
                     )?;
                     chrome_dirty = false;
+                }
+                if need_chrome {
+                    sync_startup_subtitle(
+                        &mut out,
+                        parser.screen(),
+                        width,
+                        pty_rows,
+                        &host_status,
+                    )?;
                 }
                 if parser.screen().scrollback() > 0 {
                     queue!(out, cursor::Hide)?;
@@ -713,6 +1025,8 @@ pub fn run(root: &Path) -> Result<()> {
             }
             let wait = if dirty {
                 Duration::from_millis(8)
+            } else if host_status.busy_since.is_some() {
+                Duration::from_millis(40)
             } else {
                 Duration::from_millis(30)
             };
@@ -721,6 +1035,8 @@ pub fn run(root: &Path) -> Result<()> {
             }
             match event::read()? {
                 Event::Resize(columns, rows) => {
+                    last_cols = columns;
+                    last_rows = rows;
                     width = layout(columns);
                     pty_rows = rows.saturating_sub(1).max(1);
                     pair.master.resize(PtySize {
@@ -736,26 +1052,109 @@ pub fn run(root: &Path) -> Result<()> {
                     dirty = true;
                 }
                 Event::Paste(text) => {
-                    parser.set_scrollback(0);
+                    if parser.screen().scrollback() > 0 {
+                        parser.set_scrollback(0);
+                        chrome_dirty = true;
+                    }
                     let framed = format!("\x1b[200~{text}\x1b[201~");
                     writer.write_all(framed.as_bytes())?;
                     writer.flush()?;
-                    chrome_dirty = true;
                     dirty = true;
                 }
+                Event::Mouse(mouse) => match mouse.kind {
+                    MouseEventKind::ScrollUp => {
+                        let before = parser.screen().scrollback();
+                        parser.set_scrollback(before + 3);
+                        if parser.screen().scrollback() != before {
+                            chrome_dirty = true;
+                            dirty = true;
+                        }
+                    }
+                    MouseEventKind::ScrollDown => {
+                        let before = parser.screen().scrollback();
+                        if before > 0 {
+                            parser.set_scrollback(before.saturating_sub(3));
+                            if parser.screen().scrollback() != before {
+                                chrome_dirty = true;
+                                dirty = true;
+                            }
+                        }
+                    }
+                    MouseEventKind::Down(MouseButton::Left) => {
+                        // Clickable bottom status bar badges.
+                        if mouse.row == last_rows.saturating_sub(1) {
+                            if let Some(hit) = bar_hitboxes
+                                .iter()
+                                .find(|h| mouse.column >= h.start_col && mouse.column < h.end_col)
+                            {
+                                match hit.action {
+                                    BarAction::CycleEffort => {
+                                        if host_status.busy_since.is_none() {
+                                            writer.write_all(b"\x1b[Z")?;
+                                            writer.flush()?;
+                                            dirty = true;
+                                        }
+                                    }
+                                    BarAction::ToggleThinking => {
+                                        if host_status.busy_since.is_none() {
+                                            writer.write_all(b"\x1bOR")?;
+                                            writer.flush()?;
+                                            dirty = true;
+                                        }
+                                    }
+                                    BarAction::ToggleShell => {
+                                        if host_status.busy_since.is_none() {
+                                            writer.write_all(b"\x1bOS")?;
+                                            writer.flush()?;
+                                            dirty = true;
+                                        }
+                                    }
+                                    BarAction::ClearScrollback => {
+                                        if parser.screen().scrollback() > 0 {
+                                            parser.set_scrollback(0);
+                                            chrome_dirty = true;
+                                            dirty = true;
+                                        }
+                                    }
+                                }
+                            }
+                        } else if last_cols >= SIDEBAR_MIN_COLUMNS
+                            && mouse.column >= width
+                            && mouse.row >= 5
+                            && mouse.row < pty_rows.saturating_sub(4)
+                            && host_status.busy_since.is_none()
+                        {
+                            // Clickable session entry in right sidebar.
+                            let idx = (mouse.row - 5) as usize;
+                            if let Some(entry) = entries.get(idx) {
+                                if parser.screen().scrollback() > 0 {
+                                    parser.set_scrollback(0);
+                                    chrome_dirty = true;
+                                }
+                                let cmd = format!("\x15/history {}\r", entry.id);
+                                writer.write_all(cmd.as_bytes())?;
+                                writer.flush()?;
+                                dirty = true;
+                            }
+                        }
+                    }
+                    _ => {}
+                },
                 Event::Key(key) if key.kind != KeyEventKind::Release => {
                     if key.code == KeyCode::F(10) {
                         break;
                     }
                     if matches!(key.code, KeyCode::PageUp | KeyCode::PageDown) {
-                        let offset = parser.screen().scrollback();
+                        let before = parser.screen().scrollback();
                         parser.set_scrollback(if key.code == KeyCode::PageUp {
-                            offset + SCROLL_STEP
+                            before + SCROLL_STEP
                         } else {
-                            offset.saturating_sub(SCROLL_STEP)
+                            before.saturating_sub(SCROLL_STEP)
                         });
-                        chrome_dirty = true;
-                        dirty = true;
+                        if parser.screen().scrollback() != before {
+                            chrome_dirty = true;
+                            dirty = true;
+                        }
                         continue;
                     }
                     if parser.screen().scrollback() > 0 {
@@ -830,5 +1229,47 @@ mod tests {
         assert_eq!(status.model, "gpt-4.1");
         assert_eq!(status.effort, EffortLevel::High);
         assert!(status.shell_enabled);
+        assert!(status.apply_osc("busy=1"));
+        assert!(status.busy_since.is_some());
+        assert!(status.apply_osc("busy=0"));
+        assert!(status.busy_since.is_none());
+    }
+
+    #[test]
+    fn osc_filter_handles_double_esc_before_osc() {
+        let mut f = OscFilter::default();
+        let (out, ev) = f.process(b"\x1b\x1b]7700;effort=max\x07ok");
+        assert_eq!(out, b"\x1bok");
+        assert_eq!(ev, vec!["effort=max"]);
+    }
+
+    #[test]
+    fn sync_startup_subtitle_updates_both_header_and_status_line() {
+        let mut parser = vt100::Parser::new(12, 80, 0);
+        parser.process(
+            concat!(
+                "  ██     ◆  original  0.3.13\r\n",
+                " ▓██▓    openai · old-model · low\r\n",
+                "░▓██▓░\r\n",
+                " ▓██▓\r\n",
+                "  ██\r\n",
+                "\r\n",
+                "old-model · low · in — · out — · cache — · ctx — · —\r\n"
+            )
+            .as_bytes(),
+        );
+        let mut status = HostStatus::from_config();
+        status.logged_in = true;
+        status.api_style = "anthropic".into();
+        status.model = "claude-sonnet-4".into();
+        status.effort = EffortLevel::High;
+
+        let mut buf = Vec::new();
+        sync_startup_subtitle(&mut buf, parser.screen(), 80, 12, &status).unwrap();
+        let text = String::from_utf8_lossy(&buf);
+        assert!(text.contains("anthropic · claude-sonnet-4 · "));
+        assert!(text.contains("claude-sonnet-4 · "));
+        assert!(text.contains("high"));
+        assert!(text.contains(" · in — · out —"));
     }
 }

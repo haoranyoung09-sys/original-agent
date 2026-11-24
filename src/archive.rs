@@ -209,11 +209,40 @@ fn session_topic(metadata: &Value, dir: &Path) -> String {
         .unwrap_or_else(|| "未命名会话".into())
 }
 
-fn list_sessions(cwd: &Path, compact: bool) -> Result<String> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionEntry {
+    pub id: String,
+    pub topic: String,
+    pub model: String,
+}
+
+fn normalize_cwd(raw: &str) -> String {
+    let trimmed = raw.strip_prefix(r"\\?\").unwrap_or(raw);
+    #[cfg(windows)]
+    {
+        trimmed.replace('/', "\\").to_ascii_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        trimmed.to_string()
+    }
+}
+
+fn id_sort_key(id: &str) -> (u128, &str) {
+    let ts = id
+        .split('-')
+        .next()
+        .and_then(|s| s.parse::<u128>().ok())
+        .unwrap_or(0);
+    (ts, id)
+}
+
+pub fn list_entries(cwd: &Path) -> Result<Vec<SessionEntry>> {
     let root = base()?;
     if !root.exists() {
-        return Ok("No sessions".into());
+        return Ok(Vec::new());
     }
+    let target_cwd = normalize_cwd(&cwd.to_string_lossy());
     let mut rows = Vec::new();
     for entry in fs::read_dir(root)? {
         let dir = entry?.path();
@@ -223,29 +252,157 @@ fn list_sessions(cwd: &Path, compact: bool) -> Result<String> {
         let Ok(value) = serde_json::from_str::<Value>(&raw) else {
             continue;
         };
-        if value["cwd"].as_str() != Some(cwd.to_string_lossy().as_ref()) {
+        let Some(entry_cwd) = value["cwd"].as_str() else {
+            continue;
+        };
+        if normalize_cwd(entry_cwd) != target_cwd {
             continue;
         }
         let id = value["id"].as_str().unwrap_or("?").to_string();
         let topic = session_topic(&value, &dir);
-        let model = value["model"].as_str().unwrap_or("?");
-        let line = if compact {
-            topic
-        } else {
-            format!("{topic}  ·  {model}\n  {id}")
-        };
-        rows.push((id, line));
+        let model = value["model"].as_str().unwrap_or("?").to_string();
+        rows.push(SessionEntry { id, topic, model });
     }
-    rows.sort_by(|a, b| a.0.cmp(&b.0));
-    if rows.is_empty() {
+    rows.sort_by(|a, b| id_sort_key(&b.id).cmp(&id_sort_key(&a.id)));
+    Ok(rows)
+}
+
+fn list_sessions(cwd: &Path, compact: bool) -> Result<String> {
+    let root = base()?;
+    if !root.exists() {
+        return Ok("No sessions".into());
+    }
+    let entries = list_entries(cwd)?;
+    if entries.is_empty() {
         return Ok("当前项目暂无会话记录".into());
     }
-    rows.reverse();
-    Ok(rows
+    Ok(entries
         .into_iter()
-        .map(|(_, line)| line)
+        .map(|e| {
+            if compact {
+                e.topic
+            } else {
+                format!("{}  ·  {}\n  {}", e.topic, e.model, e.id)
+            }
+        })
         .collect::<Vec<_>>()
         .join("\n"))
+}
+
+fn extract_text_from_message(msg: &Value) -> Option<(String, String)> {
+    let role = msg.get("role")?.as_str()?;
+    if role != "user" && role != "assistant" {
+        return None;
+    }
+    let content = msg.get("content")?;
+    let text = if let Some(s) = content.as_str() {
+        s.trim().to_string()
+    } else {
+        let arr = content.as_array()?;
+        arr.iter()
+            .filter_map(|block| {
+                if block.get("type").and_then(Value::as_str) == Some("text") {
+                    block.get("text").and_then(Value::as_str)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim()
+            .to_string()
+    };
+    if text.is_empty() {
+        return None;
+    }
+    Some((role.to_string(), text))
+}
+
+fn load_turns_from_dir(dir: &Path) -> Result<(String, Vec<(String, String)>)> {
+    let topic = fs::read_to_string(dir.join("metadata.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .map(|value| session_topic(&value, dir))
+        .unwrap_or_else(|| "未命名会话".into());
+    let path = dir.join("events.jsonl");
+    if !path.exists() {
+        return Ok((topic, Vec::new()));
+    }
+    let mut messages: Vec<(String, String)> = Vec::new();
+    for line in fs::read_to_string(&path)?.lines() {
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if value["kind"].as_str() != Some("turn") {
+            continue;
+        }
+        let Some(raw) = value["text"].as_str() else {
+            continue;
+        };
+        let Ok(Value::Array(arr)) = serde_json::from_str::<Value>(raw) else {
+            continue;
+        };
+        for item in &arr {
+            if let Some((role, text)) = extract_text_from_message(item) {
+                if let Some(last) = messages.last_mut() {
+                    if last.0 == role {
+                        if last.1 != text {
+                            last.1.push_str("\n\n");
+                            last.1.push_str(&text);
+                        }
+                        continue;
+                    }
+                }
+                messages.push((role, text));
+            }
+        }
+    }
+    Ok((topic, messages))
+}
+
+pub struct RestoredConversation {
+    pub id: String,
+    pub topic: String,
+    pub messages: Vec<(String, String)>,
+}
+
+/// Restore user/assistant text turns from a saved archive for `/resume [id]`.
+/// When `id` is `None`, picks the most recent archive in `cwd` that has saved turns
+/// (skipping the current empty session).
+pub fn load_conversation(cwd: &Path, id: Option<&str>) -> Result<RestoredConversation> {
+    if let Some(id) = id {
+        let dir = checked_id(id.trim())?;
+        let (topic, messages) = load_turns_from_dir(&dir)?;
+        if messages.is_empty() {
+            bail!("归档 {id} 中没有可恢复的对话记录");
+        }
+        return Ok(RestoredConversation {
+            id: id.trim().to_string(),
+            topic,
+            messages,
+        });
+    }
+    let active_dir = active().lock().unwrap().as_ref().map(|a| a.dir.clone());
+    let entries = list_entries(cwd)?;
+    for entry in entries {
+        let Ok(dir) = checked_id(&entry.id) else {
+            continue;
+        };
+        if active_dir.as_deref() == Some(dir.as_path()) {
+            continue;
+        }
+        let Ok((topic, messages)) = load_turns_from_dir(&dir) else {
+            continue;
+        };
+        if !messages.is_empty() {
+            return Ok(RestoredConversation {
+                id: entry.id,
+                topic,
+                messages,
+            });
+        }
+    }
+    bail!("当前项目没有可恢复的历史会话")
 }
 
 pub fn start(root: &Path, model: &str, disabled: bool) -> Result<()> {
@@ -492,6 +649,40 @@ mod tests {
         let saved: Value =
             serde_json::from_str(&fs::read_to_string(dir.join("metadata.json")).unwrap()).unwrap();
         assert_eq!(saved["topic"].as_str(), Some("用 [REDACTED] 改文档"));
+        fs::remove_file(dir.join("metadata.json")).unwrap();
+        fs::remove_dir(dir).unwrap();
+    }
+
+    #[test]
+    fn loads_anthropic_and_openai_turns_for_resume() {
+        let dir = temp_dir("resume");
+        private_write(
+            &dir.join("metadata.json"),
+            "{\"id\":\"1\",\"topic\":\"恢复测试\"}",
+            false,
+        )
+        .unwrap();
+        let turn_payload = json!([
+            {"role": "user", "content": "你好"},
+            {"role": "assistant", "content": [{"type": "thinking", "thinking": "hmm"}, {"type": "text", "text": "你好！"}]},
+            {"role": "tool", "content": "ignored tool output"},
+            {"role": "user", "content": "继续"},
+            {"role": "assistant", "content": "好的"}
+        ]);
+        let ev = json!({"kind": "turn", "time_unix": 1, "text": turn_payload.to_string()});
+        private_write(&dir.join("events.jsonl"), &(ev.to_string() + "\n"), false).unwrap();
+        let (topic, msgs) = load_turns_from_dir(&dir).unwrap();
+        assert_eq!(topic, "恢复测试");
+        assert_eq!(
+            msgs,
+            vec![
+                ("user".into(), "你好".into()),
+                ("assistant".into(), "你好！".into()),
+                ("user".into(), "继续".into()),
+                ("assistant".into(), "好的".into()),
+            ]
+        );
+        fs::remove_file(dir.join("events.jsonl")).unwrap();
         fs::remove_file(dir.join("metadata.json")).unwrap();
         fs::remove_dir(dir).unwrap();
     }

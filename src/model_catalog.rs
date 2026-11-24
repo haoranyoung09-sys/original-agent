@@ -296,6 +296,35 @@ pub fn lookup(model: &str) -> Option<&'static ModelDefaults> {
     best.map(|(_, d)| d)
 }
 
+/// Curated model IDs for interactive `/model` selection by provider.
+pub fn suggested_models(provider: crate::provider::ProviderId) -> &'static [&'static str] {
+    use crate::provider::ProviderId;
+    match provider {
+        ProviderId::Anthropic => &[
+            "claude-sonnet-4-20250514",
+            "claude-sonnet-4-5",
+            "claude-sonnet-4-6",
+            "claude-opus-4-5",
+            "claude-haiku-4-5",
+        ],
+        ProviderId::OpenAI => &[
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4.1-nano",
+            "gpt-4o",
+            "o3",
+            "o4-mini",
+        ],
+        ProviderId::DeepSeekAnthropic | ProviderId::DeepSeekOpenAI => &[
+            "deepseek-flash",
+            "deepseek-v4-pro",
+            "deepseek-chat",
+            "deepseek-reasoner",
+        ],
+        ProviderId::Custom | ProviderId::Local => &[],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

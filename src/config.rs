@@ -232,6 +232,7 @@ impl Config {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn has_api_key(&self) -> bool {
         self.api_key
             .as_ref()

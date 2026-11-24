@@ -18,6 +18,9 @@ pub enum SlashAction {
     Theme {
         name: Option<String>,
     },
+    Resume {
+        id: Option<String>,
+    },
     /// `None` means show current model; `Some(name)` switches.
     Model {
         name: Option<String>,
@@ -35,6 +38,7 @@ pub const SLASH_COMMANDS: &[&str] = &[
     "/thinking",
     "/shell",
     "/theme",
+    "/resume",
     "/status",
     "/usage",
     "/history",
@@ -87,6 +91,13 @@ pub fn parse_slash(line: &str) -> SlashAction {
                 Some(rest.to_string())
             },
         },
+        "/resume" => SlashAction::Resume {
+            id: if rest.is_empty() {
+                None
+            } else {
+                Some(rest.to_string())
+            },
+        },
         "/model" => {
             if rest.is_empty() {
                 SlashAction::Model { name: None }
@@ -134,6 +145,13 @@ mod tests {
             parse_slash("/theme dark"),
             SlashAction::Theme {
                 name: Some("dark".into())
+            }
+        );
+        assert_eq!(parse_slash("/resume"), SlashAction::Resume { id: None });
+        assert_eq!(
+            parse_slash("/resume 123-45"),
+            SlashAction::Resume {
+                id: Some("123-45".into())
             }
         );
         assert_eq!(parse_slash("/model"), SlashAction::Model { name: None });
